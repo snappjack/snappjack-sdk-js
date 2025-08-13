@@ -1,6 +1,6 @@
 {
   "name": "@snappjack/sdk-js",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "TypeScript SDK for Snappjack - Enable your app for AI agents",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -17,7 +17,7 @@
   ],
   "scripts": {
     "build": "tsc && npm run build:browser",
-    "build:browser": "rollup -c",
+    "build:browser": "rollup -c rollup.config.mjs",
     "build:watch": "tsc --watch",
     "dev": "tsc --watch",
     "test": "jest",

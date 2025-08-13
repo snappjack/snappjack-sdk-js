@@ -9,14 +9,16 @@ export default {
       file: 'dist/snappjack-sdk.js',
       format: 'umd',
       name: 'Snappjack',
-      sourcemap: true
+      sourcemap: true,
+      exports: 'named'
     },
     {
       file: 'dist/snappjack-sdk.min.js', 
       format: 'umd',
       name: 'Snappjack',
       sourcemap: true,
-      plugins: [terser()]
+      plugins: [terser()],
+      exports: 'named'
     },
     {
       file: 'dist/index.mjs',
@@ -31,7 +33,8 @@ export default {
     typescript({
       tsconfig: './tsconfig.json',
       declaration: false,
-      declarationMap: false
+      declarationMap: false,
+      module: 'ESNext'
     })
   ]
 };
