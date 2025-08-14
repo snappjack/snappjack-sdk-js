@@ -499,8 +499,6 @@ export class Snappjack extends EventEmitter {
     const toolName = message.params.name;
     const tool = this.tools.get(toolName);
 
-    this.logger.error(`🔧 Snappjack: Tool call received: ${JSON.stringify(message)}`);
-    
     if (tool && tool.handler) {
       try {
         const result = await tool.handler(message.params.arguments, message);
