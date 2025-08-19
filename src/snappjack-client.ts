@@ -8,6 +8,7 @@
 
 import { EventEmitter, EventListener } from './event-emitter';
 import { createWebSocket, WebSocket, ReadyState } from './websocket-wrapper';
+import Ajv, { ValidateFunction } from 'ajv';
 
 // Types and Interfaces
 export interface SnappjackConfig {
@@ -187,6 +188,8 @@ export class Snappjack extends EventEmitter {
   private userApiKey: string | null = null;
   private lastToolCallAgentSessionId: string | undefined;
   private logger: Logger;
+  private ajv: Ajv;
+  private validators: Map<string, ValidateFunction> = new Map();
 
   constructor(config: SnappjackConfig) {
     super();
@@ -203,6 +206,14 @@ export class Snappjack extends EventEmitter {
     };
     
     this.logger = this.config.logger;
+    
+    // Initialize Ajv with appropriate configuration
+    this.ajv = new Ajv({
+      coerceTypes: true,
+      useDefaults: true,
+      allErrors: true,
+      strict: false
+    });
     
     this.validateConfig();
     this.initializeTools();
@@ -228,6 +239,36 @@ export class Snappjack extends EventEmitter {
       }
     }
   };
+
+  /**
+   * Recursively enforce strict schema validation by adding additionalProperties: false
+   */
+  private enforceStrictSchema(schema: any): any {
+    if (typeof schema !== 'object' || schema === null) {
+      return schema;
+    }
+
+    const strictSchema = { ...schema };
+
+    // Add additionalProperties: false to object schemas
+    if (strictSchema.type === 'object' && strictSchema.properties) {
+      strictSchema.additionalProperties = false;
+      
+      // Recursively enforce on nested properties
+      const strictProperties: any = {};
+      for (const [key, prop] of Object.entries(strictSchema.properties)) {
+        strictProperties[key] = this.enforceStrictSchema(prop);
+      }
+      strictSchema.properties = strictProperties;
+    }
+
+    // Handle array items
+    if (strictSchema.type === 'array' && strictSchema.items) {
+      strictSchema.items = this.enforceStrictSchema(strictSchema.items);
+    }
+
+    return strictSchema;
+  }
 
   private validateConfig(): void {
     this.logger.log('🔧 Snappjack: Validating config...');
@@ -264,6 +305,23 @@ export class Snappjack extends EventEmitter {
       ...tool,
       handler: tool.handler || undefined
     });
+    
+    // Compile and cache validator for the tool's input schema
+    try {
+      // Enforce strict validation by recursively adding additionalProperties: false
+      const strictSchema = this.enforceStrictSchema(tool.inputSchema);
+      
+      this.logger.log(`🔧 Compiling validator for tool '${tool.name}' with strict schema: ${JSON.stringify(strictSchema, null, 2)}`);
+      const validator = this.ajv.compile(strictSchema);
+      this.validators.set(tool.name, validator);
+      this.logger.log(`✅ Snappjack: Compiled validator for tool '${tool.name}'`);
+      
+      // Test the validator with a simple invalid case to ensure it's working
+      const testResult = validator({ invalidTest: 'should fail' });
+      this.logger.log(`🧪 Validator test: ${testResult ? 'PASSED' : 'FAILED'} (expected: FAILED)`);
+    } catch (error) {
+      this.logger.warn(`⚠️ Snappjack: Failed to compile validator for tool '${tool.name}': ${error instanceof Error ? error.message : String(error)}`);
+    }
     
     // Auto-register tool handler if provided
     if (tool.handler && typeof tool.handler === 'function') {
@@ -499,26 +557,93 @@ export class Snappjack extends EventEmitter {
     const toolName = message.params.name;
     const tool = this.tools.get(toolName);
 
-    if (tool && tool.handler) {
-      try {
-        const result = await tool.handler(message.params.arguments, message);
-        this.sendToolResponse(message.id, result);
-      } catch (error) {
-        const errorResponse: ErrorResponse = {
-          code: -32603,
-          message: error instanceof Error ? error.message : "Internal error",
-          data: error instanceof Error ? error.message : String(error)
-        };
-        this.sendToolError(message.id, errorResponse);
-      }
-    } else {
-      // Tool not found or no handler
+    if (!tool || !tool.handler) {
+      // Tool not found - this is a protocol error
       const errorResponse: ErrorResponse = {
         code: -32601,
         message: 'Method not found',
         data: `Tool '${toolName}' not found or no handler registered`
       };
       this.sendToolError(message.id, errorResponse);
+      return;
+    }
+
+    this.logger.log(`tool: ${JSON.stringify(tool)}`);
+    this.logger.log(`message.params.arguments: ${JSON.stringify(message.params.arguments)}`);
+
+    try {
+      // Validate tool arguments against schema before calling handler
+      const validator = this.validators.get(toolName);
+      this.logger.log(`validator: ${typeof validator}`);
+
+      if (validator) {
+        this.logger.log(`🔍 BEFORE validation - arguments: ${JSON.stringify(message.params.arguments, null, 2)}`);
+        this.logger.log(`🔍 Input schema: ${JSON.stringify(tool.inputSchema, null, 2)}`);
+        
+        const isValid = validator(message.params.arguments);
+        
+        this.logger.log(`🔍 AFTER validation - isValid: ${isValid}`);
+        this.logger.log(`🔍 AFTER validation - arguments (potentially coerced): ${JSON.stringify(message.params.arguments, null, 2)}`);
+        this.logger.log(`🔍 Validation errors: ${JSON.stringify(validator.errors, null, 2)}`);
+
+        if (!isValid) {
+          // Validation failed - this is a tool execution error, not a protocol error
+          const validationErrors = validator.errors || [];
+          const errorDetails = validationErrors.map(err => {
+            const path = err.instancePath || 'root';
+            return `${path}: ${err.message}`;
+          }).join(', ');
+          
+          // Return tool execution error with isError flag
+          const errorResult: ToolResponse = {
+            content: [{
+              type: 'text',
+              text: `Invalid arguments for tool '${toolName}': ${errorDetails}`
+            }],
+            isError: true
+          };
+          
+          this.logger.warn(`❌ Snappjack: Tool '${toolName}' validation failed: ${errorDetails}`);
+          this.sendToolResponse(message.id, errorResult);
+          return;
+        }
+        
+        this.logger.log(`✅ Snappjack: Tool '${toolName}' arguments validated successfully`);
+      } else {
+        this.logger.warn(`⚠️ Snappjack: No validator found for tool '${toolName}', proceeding without validation`);
+      }
+      
+      // Call handler with validated (and potentially coerced) arguments
+      const result = await tool.handler(message.params.arguments, message);
+      
+      // Ensure result has proper format
+      if (!result || typeof result !== 'object' || !Array.isArray(result.content)) {
+        // Invalid result format - return as tool execution error
+        const errorResult: ToolResponse = {
+          content: [{
+            type: 'text',
+            text: `Tool handler for '${toolName}' returned invalid result format`
+          }],
+          isError: true
+        };
+        this.sendToolResponse(message.id, errorResult);
+        return;
+      }
+      
+      this.sendToolResponse(message.id, result);
+    } catch (error) {
+      // Handler threw an exception - this is a tool execution error, not a protocol error
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorResult: ToolResponse = {
+        content: [{
+          type: 'text',
+          text: `Tool execution failed: ${errorMessage}`
+        }],
+        isError: true
+      };
+      
+      this.logger.warn(`❌ Snappjack: Tool '${toolName}' execution error: ${errorMessage}`);
+      this.sendToolResponse(message.id, errorResult);
     }
   }
 
@@ -580,7 +705,9 @@ export class Snappjack extends EventEmitter {
 
   private sendMessage(message: WebSocketMessage): void {
     if (this.ws && this.ws.readyState === ReadyState.OPEN) {
-      this.ws.send(JSON.stringify(message));
+      const messageStr = JSON.stringify(message);
+      this.logger.log(`📤 Sending WebSocket message: ${messageStr}`);
+      this.ws.send(messageStr);
     } else {
       throw new Error('WebSocket is not connected');
     }
@@ -630,10 +757,54 @@ export class Snappjack extends EventEmitter {
         agentSessionId: this.lastToolCallAgentSessionId
       };
 
+      this.logger.log(`🚨 Sending protocol error response: ${JSON.stringify(errorResponse, null, 2)}`);
       this.sendMessage(errorResponse);
+      this.logger.log(`✅ Protocol error response sent successfully`);
     } catch (error) {
+      this.logger.error(`❌ Failed to send error response: ${error instanceof Error ? error.message : String(error)}`);
       this.emit('error', error);
     }
+  }
+
+  /**
+   * Create a tool execution error response with proper MCP format
+   */
+  private createToolExecutionError(message: string, details?: unknown): ToolResponse {
+    const errorResult: ToolResponse = {
+      content: [{
+        type: 'text',
+        text: message
+      }],
+      isError: true
+    };
+
+    // Add structured content if details provided
+    if (details !== undefined) {
+      errorResult.structuredContent = {
+        error: message,
+        details: details
+      };
+    }
+
+    return errorResult;
+  }
+
+  /**
+   * Create a successful tool response with proper MCP format
+   */
+  private createToolSuccess(text: string, structuredContent?: unknown): ToolResponse {
+    const result: ToolResponse = {
+      content: [{
+        type: 'text',
+        text: text
+      }]
+    };
+
+    if (structuredContent !== undefined && structuredContent !== null) {
+      result.structuredContent = structuredContent as { [key: string]: unknown };
+    }
+
+    return result;
   }
 
   // Private method to generate user API key for agent connections
