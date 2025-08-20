@@ -60,5 +60,35 @@ export default [
         module: 'ESNext'
       })
     ]
+  },
+  // Server-side build - Node.js only
+  {
+    input: 'src/server.ts',
+    output: [
+      {
+        file: 'dist/server.js',
+        format: 'cjs',
+        sourcemap: true
+      },
+      {
+        file: 'dist/server.mjs',
+        format: 'es',
+        sourcemap: true
+      }
+    ],
+    external: ['node:fetch', 'fetch'],
+    plugins: [
+      nodeResolve({
+        preferBuiltins: true
+      }),
+      commonjs(),
+      json(),
+      typescript({
+        tsconfig: './tsconfig.json',
+        declaration: false,
+        declarationMap: false,
+        module: 'ESNext'
+      })
+    ]
   }
 ];

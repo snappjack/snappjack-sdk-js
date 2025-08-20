@@ -8,19 +8,20 @@
 
 import { EventEmitter, EventListener } from './event-emitter';
 import { createWebSocket, WebSocket, ReadyState } from './websocket-wrapper';
+import { DEFAULT_SNAPPJACK_SERVER_URL } from './constants';
 import Ajv, { ValidateFunction } from 'ajv';
 
 // Types and Interfaces
 export interface SnappjackConfig {
   appId: string;
   userId: string;
-  apiKey: string;
-  serverUrl?: string;
+  snappjackTokenEndpoint: string;
+  tools?: Tool[];
   autoReconnect?: boolean;
   reconnectInterval?: number;
   maxReconnectAttempts?: number;
-  tools?: Tool[];
   logger?: Logger;
+  serverUrl?: string;
 }
 
 export interface Logger {
@@ -174,8 +175,7 @@ export type WebSocketMessage = JsonRpcResponse | ToolRegistrationMessage;
 // Union type for all incoming messages
 export type IncomingMessage = ToolCallMessage | AgentMessage | { type: string; [key: string]: unknown };
 
-// Default Snappjack server URL
-const DEFAULT_SERVER_URL = 'https://bridge.snappjack.com';
+
 
 export class Snappjack extends EventEmitter {
   private config: Required<SnappjackConfig>;
@@ -193,28 +193,49 @@ export class Snappjack extends EventEmitter {
 
   constructor(config: SnappjackConfig) {
     super();
-    
-    // Set defaults - use provided serverUrl or fallback to default
-    this.config = {
-      ...config,
-      serverUrl: config.serverUrl || DEFAULT_SERVER_URL,
-      autoReconnect: config.autoReconnect ?? true,
-      reconnectInterval: config.reconnectInterval ?? 5000,
-      maxReconnectAttempts: config.maxReconnectAttempts ?? 10,
-      tools: config.tools || [],
-      logger: config.logger || this.defaultLogger
+
+    // Define all defaults in one place.
+    const defaultConfig = {
+      serverUrl: DEFAULT_SNAPPJACK_SERVER_URL,
+      autoReconnect: true,
+      reconnectInterval: 5000,
+      maxReconnectAttempts: 10,
+      tools: [],
+      logger: this.defaultLogger,
     };
-    
+
+    // Create a clean config object by removing any keys with an `undefined` value from the user's input.
+    const definedUserConfig = Object.fromEntries(
+      Object.entries(config).filter(([_, value]) => value !== undefined)
+    ) as SnappjackConfig;
+
+    // Merge the cleaned user config over the defaults.
+    this.config = {
+      ...defaultConfig,
+      ...definedUserConfig,
+    };
+
+    // Validate required fields from the final, merged config.
+    if (!this.config.appId) {
+      throw new Error('App ID is required');
+    }
+
+    // Perform any necessary transformations on the final config values.
+    // we expect the server url to be http or https so validate it first
+    if (!this.config.serverUrl.match(/^https?:\/\//)) {
+      throw new Error('Server URL must start with http:// or https://');
+    }
+    this.config.serverUrl = this.config.serverUrl.replace(/^http/, 'ws');
+
     this.logger = this.config.logger;
     
-    // Initialize Ajv with appropriate configuration
     this.ajv = new Ajv({
       coerceTypes: true,
       useDefaults: true,
       allErrors: true,
-      strict: false
+      strict: false,
     });
-    
+
     this.validateConfig();
     this.initializeTools();
   }
@@ -272,6 +293,7 @@ export class Snappjack extends EventEmitter {
 
   private validateConfig(): void {
     this.logger.log('🔧 Snappjack: Validating config...');
+    this.logger.log(`🔧 Snappjack: Using app ID: ${this.config.appId}`);
     this.logger.log(`🔧 Snappjack: Using server URL: ${this.config.serverUrl}`);
     
     if (!this.config.appId) {
@@ -280,8 +302,8 @@ export class Snappjack extends EventEmitter {
     if (!this.config.userId) {
       throw new Error('User ID is required');
     }
-    if (!this.config.apiKey) {
-      throw new Error('API key is required');
+    if (!this.config.snappjackTokenEndpoint) {
+      throw new Error('Snappjack token endpoint is required');
     }
     if (!this.config.serverUrl) {
       throw new Error('Server URL is required');
@@ -336,10 +358,10 @@ export class Snappjack extends EventEmitter {
       return;
     }
 
-    // If we don't have a user API key, get one first using webapp API key
+    // If we don't have a user API key, get one first from webapp token endpoint
     if (!this.userApiKey) {
-      this.logger.log('🔑 Snappjack: No user API key, generating one...');
-      await this.generateUserApiKey();
+      this.logger.log('🔑 Snappjack: No user API key, requesting one...');
+      await this.requestUserApiKey();
       
       // Wait for the key to be generated
       if (!this.userApiKey) {
@@ -428,11 +450,14 @@ export class Snappjack extends EventEmitter {
       this.logger.log(`🏗️ Snappjack: Removed trailing slash: ${baseUrl}`);
     }
     
-    // Use user API key if available, otherwise fall back to webapp API key
-    const apiKey = this.userApiKey || this.config.apiKey;
-    this.logger.log(`🏗️ Snappjack: Using API key: ${apiKey ? apiKey.substring(0, 8) + '...' : 'none'} (${this.userApiKey ? 'user' : 'webapp'} key)`);
+    // Use user API key (required)
+    if (!this.userApiKey) {
+      throw new Error('User API key is required for WebSocket connection');
+    }
     
-    const wsUrl = `${baseUrl}/ws/${this.config.appId}/${this.config.userId}?apiKey=${apiKey}`;
+    this.logger.log(`🏗️ Snappjack: Using user API key: ${this.userApiKey.substring(0, 8)}...`);
+    
+    const wsUrl = `${baseUrl}/ws/${this.config.appId}/${this.config.userId}?apiKey=${this.userApiKey}`;
     this.logger.log(`🏗️ Snappjack: Final WebSocket URL: ${wsUrl}`);
     return wsUrl;
   }
@@ -807,52 +832,44 @@ export class Snappjack extends EventEmitter {
     return result;
   }
 
-  // Private method to generate user API key for agent connections
-  private async generateUserApiKey(): Promise<void> {
+  // Private method to request user API key from webapp token endpoint
+  private async requestUserApiKey(): Promise<void> {
     try {
-      this.logger.log('🔑 Snappjack: Starting user API key generation...');
-      let httpUrl = this.config.serverUrl;
-      this.logger.log(`🔑 Snappjack: Original URL: ${httpUrl}`);
+      this.logger.log('🔑 Snappjack: Starting user API key request...');
       
-      if (httpUrl.startsWith('ws://')) {
-        httpUrl = httpUrl.replace('ws://', 'http://');
-        this.logger.log(`🔑 Snappjack: Converted to HTTP: ${httpUrl}`);
-      } else if (httpUrl.startsWith('wss://')) {
-        httpUrl = httpUrl.replace('wss://', 'https://');
-        this.logger.log(`🔑 Snappjack: Converted to HTTPS: ${httpUrl}`);
-      }
+      // Build snappjack token endpoint URL
+      const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+      const url = new URL(this.config.snappjackTokenEndpoint, baseUrl);
+      url.searchParams.set('snappjackAppId', this.config.appId);
+      url.searchParams.set('userId', this.config.userId);
       
-      // Build API endpoint URL
-      const apiUrl = `${httpUrl}/api/user-key/${this.config.appId}/${this.config.userId}`;
-      this.logger.log(`🔑 Snappjack: API URL: ${apiUrl}`);
-      this.logger.log(`🔑 Snappjack: Using webapp API key: ${this.config.apiKey}`);
+      this.logger.log(`🔑 Snappjack: Requesting token from: ${url.toString()}`);
       
-      const response = await fetch(apiUrl, {
+      const response = await fetch(url.toString(), {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${this.config.apiKey}`,
           'Content-Type': 'application/json'
         }
       });
       
-      this.logger.log(`🔑 Snappjack: API response status: ${response.status}`);
+      this.logger.log(`🔑 Snappjack: Token response status: ${response.status}`);
       
       if (!response.ok) {
         const responseText = await response.text();
-        this.logger.error(`🔑 Snappjack: API error response: ${responseText}`);
-        throw new Error(`HTTP ${response.status}: ${response.statusText} - ${responseText}`);
+        this.logger.error(`🔑 Snappjack: Token error response: ${responseText}`);
+        throw new Error(`Failed to request user API key: ${response.status} ${response.statusText} - ${responseText}`);
       }
       
       const data = await response.json();
-      this.logger.log(`🔑 Snappjack: API response data: ${JSON.stringify(data)}`);
-      this.userApiKey = (data as any).userApiKey;
+      this.logger.log(`🔑 Snappjack: Token response data: ${JSON.stringify(data)}`);
+      this.userApiKey = data.userApiKey;
       this.logger.log(`🔑 Snappjack: User API key stored: ${this.userApiKey}`);
       
       // Emit event with connection data
       this.emit('user-api-key-generated', data);
     } catch (error) {
-      this.logger.error(`❌ Snappjack: Failed to generate user API key: ${error instanceof Error ? error.message : String(error)}`);
-      this.emit('error', new Error('Failed to generate user API key: ' + (error as Error).message));
+      this.logger.error(`❌ Snappjack: Failed to request user API key: ${error instanceof Error ? error.message : String(error)}`);
+      this.emit('error', new Error('Failed to request user API key: ' + (error as Error).message));
     }
   }
   
