@@ -222,37 +222,28 @@ export class SnappjackServerHelper {
   }
 }
 
-// Export helper for framework-specific implementations
-export function createNextJSHandler(helper: SnappjackServerHelper, options?: ServerValidationOptions) {
-  const handler = helper.createTokenHandler(options);
-  return {
-    GET: handler,
-    // Also support POST for flexibility
-    POST: async (request: Request) => {
-      // Parse body for POST requests
-      const body = await request.json().catch(() => ({}));
-      const { snappjackAppId, userId } = body;
-      
-      if (!snappjackAppId || !userId) {
-        return new Response(JSON.stringify({ 
-          error: 'snappjackAppId and userId in request body are required' 
-        }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
+// Simplified handler that automatically reads environment variables
+export function createNextJSHandler(options?: ServerValidationOptions) {
+  const appId = process.env.NEXT_PUBLIC_SNAPPJACK_APP_ID;
+  const apiKey = process.env.SNAPPJACK_APP_API_KEY;
 
-      // Create a new URL with query params for consistent handling
-      const url = new URL(request.url);
-      url.searchParams.set('snappjackAppId', snappjackAppId);
-      url.searchParams.set('userId', userId);
-      
-      const newRequest = new Request(url.toString(), {
-        method: 'GET',
-        headers: request.headers
-      });
-      
-      return handler(newRequest);
-    }
+  if (!appId) {
+    throw new Error('NEXT_PUBLIC_SNAPPJACK_APP_ID environment variable is required');
+  }
+
+  if (!apiKey) {
+    throw new Error('SNAPPJACK_APP_API_KEY environment variable is required');
+  }
+
+  const helper = new SnappjackServerHelper({ snappjackAppApiKey: apiKey });
+
+  // Add default app ID validation
+  const mergedOptions = {
+    ...options,
+    validateSnappjackAppId: options?.validateSnappjackAppId || ((requestedAppId: string) => requestedAppId === appId)
+  };
+
+  return {
+    GET: helper.createTokenHandler(mergedOptions)
   };
 }
