@@ -18,6 +18,14 @@ export interface UserApiKeyResponse {
   createdAt: string;
 }
 
+export interface CreateUserResponse {
+  userId: string;
+  userApiKey: string;
+  appId: string;
+  mcpEndpoint: string;
+  createdAt: string;
+}
+
 export interface ServerValidationOptions {
   validateSnappjackAppId?: (snappjackAppId: string) => boolean | Promise<boolean>;
   validateUserId?: (userId: string) => boolean | Promise<boolean>;
@@ -68,8 +76,34 @@ export class SnappjackServerHelper {
   }
 
   /**
+   * Create a new user with a generated UUID and API key
+   * This is the primary method for user creation in the new flow
+   */
+  async createUser(): Promise<CreateUserResponse> {
+    const url = `${this.config.snappjackServerUrl}/api/users`;
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.config.snappjackAppApiKey}`,
+        'Content-Type': 'application/json',
+        'User-Agent': 'SnappjackSDK-Server/1.0'
+      }
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Unknown error');
+      throw new Error(`Failed to create user: ${response.status} ${response.statusText}. ${errorText}`);
+    }
+
+    const data = await response.json() as CreateUserResponse;
+    return data;
+  }
+
+  /**
    * Generate a user API key for the specified Snappjack app and user
    * This should be called from your webapp's API route
+   * @deprecated Use createUser() instead for the new flow
    */
   async generateUserApiKey(snappjackAppId: string, userId: string): Promise<UserApiKeyResponse> {
     // Validate input parameters
@@ -222,14 +256,9 @@ export class SnappjackServerHelper {
   }
 }
 
-// Simplified handler that automatically reads environment variables
-export function createNextJSHandler(options?: ServerValidationOptions) {
-  const appId = process.env.NEXT_PUBLIC_SNAPPJACK_APP_ID;
+// Simplified handler for creating new users via API route
+export function createUserHandler() {
   const apiKey = process.env.SNAPPJACK_APP_API_KEY;
-
-  if (!appId) {
-    throw new Error('NEXT_PUBLIC_SNAPPJACK_APP_ID environment variable is required');
-  }
 
   if (!apiKey) {
     throw new Error('SNAPPJACK_APP_API_KEY environment variable is required');
@@ -237,13 +266,28 @@ export function createNextJSHandler(options?: ServerValidationOptions) {
 
   const helper = new SnappjackServerHelper({ snappjackAppApiKey: apiKey });
 
-  // Add default app ID validation
-  const mergedOptions = {
-    ...options,
-    validateSnappjackAppId: options?.validateSnappjackAppId || ((requestedAppId: string) => requestedAppId === appId)
-  };
-
   return {
-    GET: helper.createTokenHandler(mergedOptions)
+    POST: async (request: Request): Promise<Response> => {
+      try {
+        const result = await helper.createUser();
+        
+        return new Response(JSON.stringify(result), {
+          status: 200,
+          headers: { 
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache, no-store, must-revalidate'
+          }
+        });
+      } catch (error) {
+        console.error('Snappjack user creation error:', error);
+        
+        return new Response(JSON.stringify({ 
+          error: error instanceof Error ? error.message : 'Internal server error' 
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+    }
   };
 }

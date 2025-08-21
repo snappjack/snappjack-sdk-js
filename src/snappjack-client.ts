@@ -14,8 +14,8 @@ import Ajv, { ValidateFunction } from 'ajv';
 // Types and Interfaces
 export interface SnappjackConfig {
   appId: string;
-  userId: string;
-  snappjackTokenEndpoint: string;
+  userId?: string;  // Optional - provided when credentials exist
+  userApiKey?: string;  // Optional - provided when credentials exist
   tools?: Tool[];
   autoReconnect?: boolean;
   reconnectInterval?: number;
@@ -125,7 +125,16 @@ export interface ConnectionData {
   mcpEndpoint: string;
 }
 
-export type SnappjackStatus = 'disconnected' | 'connected' | 'bridged';
+export type SnappjackStatus = 'disconnected' | 'connected' | 'bridged' | 'error';
+
+export interface SnappjackError {
+  type: 'auth_failed' | 'server_unreachable' | 'connection_failed' | 'unknown';
+  message: string;
+  canRetry: boolean;
+  canResetCredentials: boolean;
+}
+
+type CredentialValidationResult = 'valid' | 'invalid' | 'unreachable';
 
 export interface ToolCallMessage {
   jsonrpc: '2.0';
@@ -178,7 +187,7 @@ export type IncomingMessage = ToolCallMessage | AgentMessage | { type: string; [
 
 
 export class Snappjack extends EventEmitter {
-  private config: Required<SnappjackConfig>;
+  private config: Required<Omit<SnappjackConfig, 'userId' | 'userApiKey'>> & { userId?: string; userApiKey?: string };
   private ws: WebSocket | null = null;
   private status: SnappjackStatus = 'disconnected';
   private tools: Map<string, Tool> = new Map();
@@ -190,6 +199,30 @@ export class Snappjack extends EventEmitter {
   private logger: Logger;
   private ajv: Ajv;
   private validators: Map<string, ValidateFunction> = new Map();
+
+  /**
+   * Static method to create a new user via the webapp's API endpoint
+   * This should be called before instantiating the Snappjack client
+   */
+  static async createUser(createUserEndpoint: string): Promise<{ userId: string; userApiKey: string; appId: string; mcpEndpoint: string }> {
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+    const url = new URL(createUserEndpoint, baseUrl);
+    
+    const response = await fetch(url.toString(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Unknown error');
+      throw new Error(`Failed to create user: ${response.status} ${response.statusText}. ${errorText}`);
+    }
+    
+    const data = await response.json();
+    return data;
+  }
 
   constructor(config: SnappjackConfig) {
     super();
@@ -218,6 +251,14 @@ export class Snappjack extends EventEmitter {
     // Validate required fields from the final, merged config.
     if (!this.config.appId) {
       throw new Error('App ID is required');
+    }
+
+    // Store userId and userApiKey if provided
+    if (this.config.userId) {
+      this.config.userId = this.config.userId;
+    }
+    if (this.config.userApiKey) {
+      this.userApiKey = this.config.userApiKey;
     }
 
     // Perform any necessary transformations on the final config values.
@@ -299,12 +340,6 @@ export class Snappjack extends EventEmitter {
     if (!this.config.appId) {
       throw new Error('App ID is required');
     }
-    if (!this.config.userId) {
-      throw new Error('User ID is required');
-    }
-    if (!this.config.snappjackTokenEndpoint) {
-      throw new Error('Snappjack token endpoint is required');
-    }
     if (!this.config.serverUrl) {
       throw new Error('Server URL is required');
     }
@@ -358,19 +393,13 @@ export class Snappjack extends EventEmitter {
       return;
     }
 
-    // If we don't have a user API key, get one first from webapp token endpoint
-    if (!this.userApiKey) {
-      this.logger.log('🔑 Snappjack: No user API key, requesting one...');
-      await this.requestUserApiKey();
-      
-      // Wait for the key to be generated
-      if (!this.userApiKey) {
-        throw new Error('Failed to authenticate: User API key generation failed');
-      }
-      this.logger.log(`🔑 Snappjack: User API key generated: ${this.userApiKey}`);
-    } else {
-      this.logger.log(`🔑 Snappjack: Using existing user API key: ${this.userApiKey}`);
+    // Require both userId and userApiKey for connection
+    if (!this.config.userId || !this.userApiKey) {
+      throw new Error('userId and userApiKey are required for connection. Create a new user first or provide existing credentials.');
     }
+    
+    this.logger.log(`🔑 Snappjack: Using user API key: ${this.userApiKey}`);
+    this.logger.log(`🔑 Snappjack: Using user ID: ${this.config.userId}`);
 
     return new Promise((resolve, reject) => {
       try {
@@ -404,7 +433,11 @@ export class Snappjack extends EventEmitter {
         };
 
         this.ws.onerror = (event) => {
-          this.logger.error(`❌ Snappjack: WebSocket error: ${event}`);
+          if(event.message) {
+            this.logger.error(`❌ Snappjack: WebSocket error: ${event.message}`);
+          } else {
+            this.logger.error(`❌ Snappjack: WebSocket error: ${event}`);
+          }
           clearTimeout(connectTimeout);
           this.handleError(event);
           reject(event);
@@ -479,12 +512,12 @@ export class Snappjack extends EventEmitter {
       const baseUrl = this.config.serverUrl
         .replace(/^ws:/, 'http:')
         .replace(/^wss:/, 'https:');
-      const mcpEndpoint = `${baseUrl}/mcp/${this.config.appId}/${this.config.userId}`;
+      const mcpEndpoint = `${baseUrl}/mcp/${this.config.appId}/${this.config.userId || 'unknown'}`;
       
       const eventData: ConnectionData = {
         userApiKey: this.userApiKey,
         appId: this.config.appId,
-        userId: this.config.userId,
+        userId: this.config.userId || 'unknown',
         mcpEndpoint: mcpEndpoint
       };
       this.logger.log(`🔑 Snappjack: Event data: ${JSON.stringify(eventData)}`);
@@ -538,19 +571,202 @@ export class Snappjack extends EventEmitter {
     }
   }
 
-  private handleClose(code: number): void {
+  private async handleClose(code: number, reason?: string): Promise<void> {
     this.ws = null;
     this.currentAgentSessionId = null;
-    this.updateStatus('disconnected');
+    
+    // For ambiguous codes like 1006, use credential validation to determine the real cause
+    let error: SnappjackError;
+    if (code === 1006 && this.config.userId && this.userApiKey) {
+      // 1006 is ambiguous - could be auth failure or connection issue
+      const validationResult = await this.validateCredentials();
+      
+      switch (validationResult) {
+        case 'invalid':
+          error = {
+            type: 'auth_failed',
+            message: 'Authentication failed - invalid credentials',
+            canRetry: false,
+            canResetCredentials: true
+          };
+          break;
+        case 'valid':
+          // Credentials are valid but WebSocket failed - likely a server issue
+          error = {
+            type: 'connection_failed',
+            message: 'WebSocket connection failed despite valid credentials',
+            canRetry: true,
+            canResetCredentials: false
+          };
+          break;
+        case 'unreachable':
+          error = {
+            type: 'server_unreachable',
+            message: 'Cannot connect to server - please check your network connection and server URL',
+            canRetry: true,
+            canResetCredentials: false
+          };
+          break;
+      }
+    } else {
+      // Use traditional close code classification for other codes
+      error = this.classifyConnectionError(code, reason || '');
+    }
+    
+    if (error.type === 'auth_failed') {
+      this.updateStatus('error');
+      this.emit('connection-error', error);
+      // Don't auto-reconnect on auth failure
+      return;
+    } else {
+      this.updateStatus('disconnected');
+    }
 
-    // Attempt reconnection if enabled
-    if (this.config.autoReconnect && this.shouldReconnect(code)) {
+    // Attempt reconnection if enabled and error allows retry
+    if (this.config.autoReconnect && error.canRetry && this.shouldReconnect(code)) {
       this.scheduleReconnect();
+    } else if (!error.canRetry) {
+      this.emit('connection-error', error);
     }
   }
 
-  private handleError(error: Event): void {
+  private async handleError(error: Event): Promise<void> {
+    // When WebSocket connection fails, check if it's due to invalid credentials
+    const connectionError = await this.classifyWebSocketError();
+    
+    this.updateStatus('error');
+    this.emit('connection-error', connectionError);
     this.emit('error', error);
+  }
+
+  private async classifyWebSocketError(): Promise<SnappjackError> {
+    // If we have credentials, validate them to determine the error type
+    if (this.config.userId && this.userApiKey) {
+      const validationResult = await this.validateCredentials();
+      
+      switch (validationResult) {
+        case 'invalid':
+          return {
+            type: 'auth_failed',
+            message: 'Authentication failed - invalid credentials',
+            canRetry: false,
+            canResetCredentials: true
+          };
+        case 'valid':
+          // Credentials are valid but WebSocket won't connect - likely a server/WebSocket issue
+          return {
+            type: 'connection_failed',
+            message: 'WebSocket connection failed despite valid credentials',
+            canRetry: true,
+            canResetCredentials: false
+          };
+        case 'unreachable':
+          return {
+            type: 'server_unreachable',
+            message: 'Cannot connect to server - please check your network connection and server URL',
+            canRetry: true,
+            canResetCredentials: false
+          };
+      }
+    }
+    
+    // Default to connection issue if validation fails or credentials are missing
+    return {
+      type: 'connection_failed',
+      message: 'Failed to establish WebSocket connection',
+      canRetry: true,
+      canResetCredentials: false
+    };
+  }
+
+  private async validateCredentials(): Promise<CredentialValidationResult> {
+    try {
+      const serverUrl = this.config.serverUrl
+        .replace(/^ws:/, 'http:')
+        .replace(/^wss:/, 'https:');
+      
+      const response = await fetch(`${serverUrl}/api/validate-credentials`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          userApiKey: this.userApiKey,
+          webAppId: this.config.appId,
+          userId: this.config.userId
+        })
+      });
+
+      if (!response.ok) {
+        // Server responded but credentials are invalid
+        return 'invalid';
+      }
+
+      const result = await response.json();
+      return result.valid === true ? 'valid' : 'invalid';
+    } catch (error) {
+      // Network error - server is unreachable
+      this.logger.warn(`Cannot reach server to validate credentials: ${error}`);
+      return 'unreachable';
+    }
+  }
+
+  private classifyConnectionError(code: number, reason: string): SnappjackError {
+    // WebSocket close codes: https://tools.ietf.org/html/rfc6455#section-7.4.1
+    switch (code) {
+      case 1000: // Normal closure
+        return {
+          type: 'connection_failed',
+          message: 'Connection closed normally',
+          canRetry: true,
+          canResetCredentials: false
+        };
+      
+      case 1002: // Protocol error
+      case 1008: // Policy violation (often auth-related)
+        return {
+          type: 'auth_failed',
+          message: 'Authentication failed - invalid credentials',
+          canRetry: false,
+          canResetCredentials: true
+        };
+      
+      case 1006: // Abnormal closure (no close frame)
+        // This is handled by credential validation in handleClose, 
+        // but include fallback for when not using validation
+        return {
+          type: 'server_unreachable',
+          message: 'Connection lost - server may be unreachable',
+          canRetry: true,
+          canResetCredentials: false
+        };
+      
+      case 1011: // Server error
+        return {
+          type: 'connection_failed',
+          message: 'Server encountered an error',
+          canRetry: true,
+          canResetCredentials: false
+        };
+      
+      default:
+        // Check reason string for more context
+        if (reason.toLowerCase().includes('auth') || reason.toLowerCase().includes('unauthorized')) {
+          return {
+            type: 'auth_failed',
+            message: `Authentication failed: ${reason}`,
+            canRetry: false,
+            canResetCredentials: true
+          };
+        }
+        
+        return {
+          type: 'unknown',
+          message: `Connection failed (code: ${code}${reason ? `, reason: ${reason}` : ''})`,
+          canRetry: true,
+          canResetCredentials: false
+        };
+    }
   }
 
   private handleAgentConnected(message: AgentMessage): void {
@@ -758,6 +974,36 @@ export class Snappjack extends EventEmitter {
     return this.status;
   }
 
+  /**
+   * Reset current credentials and allow new ones to be set
+   * This should be called when auth fails and user wants to get new credentials
+   */
+  public resetCredentials(): void {
+    this.userApiKey = null;
+    this.config.userId = undefined;
+    this.config.userApiKey = undefined;
+    
+    // Disconnect if currently connected
+    if (this.ws) {
+      this.disconnect();
+    }
+    
+    this.updateStatus('disconnected');
+    this.logger.log('🔄 Snappjack: Credentials reset');
+  }
+
+  /**
+   * Update credentials and attempt to connect
+   * This should be called after getting new credentials
+   */
+  public setCredentials(userId: string, userApiKey: string): void {
+    this.config.userId = userId;
+    this.config.userApiKey = userApiKey;
+    this.userApiKey = userApiKey;
+    
+    this.logger.log('🔑 Snappjack: New credentials set');
+  }
+
   private sendToolResponse(requestId: string | number, result: ToolResponse): void {
     try {
       const response: JsonRpcResponse = {
@@ -791,87 +1037,6 @@ export class Snappjack extends EventEmitter {
     }
   }
 
-  /**
-   * Create a tool execution error response with proper MCP format
-   */
-  private createToolExecutionError(message: string, details?: unknown): ToolResponse {
-    const errorResult: ToolResponse = {
-      content: [{
-        type: 'text',
-        text: message
-      }],
-      isError: true
-    };
-
-    // Add structured content if details provided
-    if (details !== undefined) {
-      errorResult.structuredContent = {
-        error: message,
-        details: details
-      };
-    }
-
-    return errorResult;
-  }
-
-  /**
-   * Create a successful tool response with proper MCP format
-   */
-  private createToolSuccess(text: string, structuredContent?: unknown): ToolResponse {
-    const result: ToolResponse = {
-      content: [{
-        type: 'text',
-        text: text
-      }]
-    };
-
-    if (structuredContent !== undefined && structuredContent !== null) {
-      result.structuredContent = structuredContent as { [key: string]: unknown };
-    }
-
-    return result;
-  }
-
-  // Private method to request user API key from webapp token endpoint
-  private async requestUserApiKey(): Promise<void> {
-    try {
-      this.logger.log('🔑 Snappjack: Starting user API key request...');
-      
-      // Build snappjack token endpoint URL
-      const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
-      const url = new URL(this.config.snappjackTokenEndpoint, baseUrl);
-      url.searchParams.set('snappjackAppId', this.config.appId);
-      url.searchParams.set('userId', this.config.userId);
-      
-      this.logger.log(`🔑 Snappjack: Requesting token from: ${url.toString()}`);
-      
-      const response = await fetch(url.toString(), {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      this.logger.log(`🔑 Snappjack: Token response status: ${response.status}`);
-      
-      if (!response.ok) {
-        const responseText = await response.text();
-        this.logger.error(`🔑 Snappjack: Token error response: ${responseText}`);
-        throw new Error(`Failed to request user API key: ${response.status} ${response.statusText} - ${responseText}`);
-      }
-      
-      const data = await response.json();
-      this.logger.log(`🔑 Snappjack: Token response data: ${JSON.stringify(data)}`);
-      this.userApiKey = data.userApiKey;
-      this.logger.log(`🔑 Snappjack: User API key stored: ${this.userApiKey}`);
-      
-      // Emit event with connection data
-      this.emit('user-api-key-generated', data);
-    } catch (error) {
-      this.logger.error(`❌ Snappjack: Failed to request user API key: ${error instanceof Error ? error.message : String(error)}`);
-      this.emit('error', new Error('Failed to request user API key: ' + (error as Error).message));
-    }
-  }
   
   // Utility method for registering tool handlers
   private onToolCall(toolName: string, handler: ToolHandler): void {

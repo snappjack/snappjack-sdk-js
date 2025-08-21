@@ -33,6 +33,7 @@ export const ReadyState = {
 export function createWebSocket(url: string): WebSocketWrapper {
   // In browser environment, use native WebSocket
   if (typeof window !== 'undefined' && typeof window.WebSocket !== 'undefined') {
+    console.log('creating web socket in browser');
     return new window.WebSocket(url) as WebSocketWrapper;
   }
   
@@ -40,6 +41,7 @@ export function createWebSocket(url: string): WebSocketWrapper {
   if (typeof global !== 'undefined' && typeof require !== 'undefined') {
     try {
       const WS = require('ws');
+      console.log('creating web socket in node');
       return new WS(url) as WebSocketWrapper;
     } catch (error) {
       throw new Error('WebSocket not available. In Node.js, install the "ws" package.');
