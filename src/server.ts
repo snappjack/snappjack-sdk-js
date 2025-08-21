@@ -5,8 +5,43 @@
 
 import { DEFAULT_SNAPPJACK_SERVER_URL } from './constants';
 
+// Get default server URL, checking environment variable first
+const DEFAULT_SERVER_URL = ((): string => {
+  // Try to get from environment (for server-side usage)
+  // Check both NEXT_PUBLIC_ version (for consistency) and non-prefixed version
+  if (typeof process !== 'undefined' && process.env) {
+    // Prefer NEXT_PUBLIC_ version for consistency with client SDK
+    if (process.env.NEXT_PUBLIC_SNAPPJACK_SERVER_URL) {
+      // Use HTTP URL directly - no conversion needed
+      return process.env.NEXT_PUBLIC_SNAPPJACK_SERVER_URL;
+    }
+    // Fall back to non-prefixed version if available
+    if (process.env.SNAPPJACK_SERVER_URL) {
+      return process.env.SNAPPJACK_SERVER_URL;
+    }
+  }
+  
+  // Fall back to production server
+  return DEFAULT_SNAPPJACK_SERVER_URL;
+})();
+
+const WEB_APP_ID = ((): string => {
+  if (process.env.NEXT_PUBLIC_SNAPPJACK_APP_ID) {
+    return process.env.NEXT_PUBLIC_SNAPPJACK_APP_ID;
+  }
+  throw new Error('NEXT_PUBLIC_SNAPPJACK_APP_ID environment variable is required');
+})();
+
+const WEB_APP_API_KEY = ((): string => {
+  if (process.env.SNAPPJACK_APP_API_KEY) {
+    return process.env.SNAPPJACK_APP_API_KEY;
+  }
+  throw new Error('SNAPPJACK_APP_API_KEY environment variable is required');
+})();
+
 export interface ServerConfig {
   snappjackAppApiKey: string;
+  webAppId: string;
   snappjackServerUrl?: string;
 }
 
@@ -34,35 +69,16 @@ export interface ServerValidationOptions {
     windowMs: number;
   };
 }
-
-// Get default server URL, checking environment variable first
-const getDefaultServerUrl = (): string => {
-  // Try to get from environment (for server-side usage)
-  // Check both NEXT_PUBLIC_ version (for consistency) and non-prefixed version
-  if (typeof process !== 'undefined' && process.env) {
-    // Prefer NEXT_PUBLIC_ version for consistency with client SDK
-    if (process.env.NEXT_PUBLIC_SNAPPJACK_SERVER_URL) {
-      // Use HTTP URL directly - no conversion needed
-      return process.env.NEXT_PUBLIC_SNAPPJACK_SERVER_URL;
-    }
-    // Fall back to non-prefixed version if available
-    if (process.env.SNAPPJACK_SERVER_URL) {
-      return process.env.SNAPPJACK_SERVER_URL;
-    }
-  }
-  
-  // Fall back to production server
-  return DEFAULT_SNAPPJACK_SERVER_URL;
-};
-
-const DEFAULT_SERVER_URL = getDefaultServerUrl();
-
 export class SnappjackServerHelper {
   private config: Required<ServerConfig>;
 
   constructor(config: ServerConfig) {
     if (!config.snappjackAppApiKey) {
       throw new Error('snappjackAppApiKey is required');
+    }
+
+    if (!config.webAppId) {
+      throw new Error('webAppId is required');
     }
 
     if (!config.snappjackAppApiKey.match(/^wak_[a-f0-9]{16}$/)) {
@@ -80,7 +96,7 @@ export class SnappjackServerHelper {
    * This is the primary method for user creation in the new flow
    */
   async createUser(): Promise<CreateUserResponse> {
-    const url = `${this.config.snappjackServerUrl}/api/users`;
+    const url = `${this.config.snappjackServerUrl}/api/webapp/${encodeURIComponent(this.config.webAppId)}/users`;
     
     const response = await fetch(url, {
       method: 'POST',
@@ -258,13 +274,10 @@ export class SnappjackServerHelper {
 
 // Simplified handler for creating new users via API route
 export function createUserHandler() {
-  const apiKey = process.env.SNAPPJACK_APP_API_KEY;
-
-  if (!apiKey) {
-    throw new Error('SNAPPJACK_APP_API_KEY environment variable is required');
-  }
-
-  const helper = new SnappjackServerHelper({ snappjackAppApiKey: apiKey });
+  const helper = new SnappjackServerHelper({ 
+    snappjackAppApiKey: WEB_APP_API_KEY,
+    webAppId: WEB_APP_ID
+  });
 
   return {
     POST: async (request: Request): Promise<Response> => {
