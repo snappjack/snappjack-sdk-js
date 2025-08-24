@@ -73,9 +73,9 @@ The SDK automatically detects the server URL from where it's loaded, enabling se
 ```javascript
 // Transform your UI into a UAI
 const snappjack = new Snappjack({
-  appId: 'your-app-id',
+  snappId: 'your-snapp-id',
   userId: currentUser.id,
-  apiKey: 'wak_...', // Your WebApp API Key
+  apiKey: 'wak_...', // Your Snapp API Key
   
   tools: [
     {
@@ -115,9 +115,9 @@ The Snappjack constructor accepts a configuration object with the following prop
 
 ### Required Parameters
 
-- **`appId`** (string): Unique identifier for your application
+- **`snappId`** (string): Unique identifier for your application
 - **`userId`** (string): Unique identifier for the current user
-- **`apiKey`** (string): WebApp API key starting with `wak_`
+- **`apiKey`** (string): Snapp API key starting with `wak_`
 
 ### Optional Parameters
 
@@ -130,7 +130,7 @@ The Snappjack constructor accepts a configuration object with the following prop
 ```javascript
 const snappjack = new Snappjack({
   // Required
-  appId: 'budget-tracker',
+  snappId: 'budget-tracker',
   userId: 'user-123',
   apiKey: 'wak_abc123def456',
   
@@ -269,7 +269,7 @@ Emitted when user API key is generated and MCP connection data is available.
 snappjack.on('user-api-key-generated', (event) => {
   const data = event.detail;
   // data.userApiKey: string - The generated user API key
-  // data.appId: string - Your app ID
+  // data.snappId: string - Your app ID
   // data.userId: string - The user ID
   // data.mcpEndpoint: string - Full MCP endpoint URL for agent connections
 });
@@ -326,7 +326,7 @@ snappjack.on('user-api-key-generated', (event) => {
   // Build MCP configuration from the event data
   const config = {
     connections: [{
-      name: `${connectionData.appId} (${connectionData.userId})`,
+      name: `${connectionData.snappId} (${connectionData.userId})`,
       type: 'streamableHttp',
       url: connectionData.mcpEndpoint,
       headers: {
@@ -347,7 +347,7 @@ The `user-api-key-generated` event provides all data needed for MCP connections:
 ```javascript
 {
   userApiKey: 'uak_abc123def456',     // User API key for agent authentication
-  appId: 'budget-tracker',             // Your app ID
+  snappId: 'budget-tracker',             // Your app ID
   userId: 'user-123',                  // Current user ID
   mcpEndpoint: 'https://bridge.snappjack.com/mcp/budget-tracker/user-123' // Full MCP endpoint
 }
@@ -574,9 +574,9 @@ Here's how a budget tracking app transforms into a UAI:
 <script>
 // Initialize Snappjack when your app loads
 const snappjack = new Snappjack({
-  appId: 'budget-tracker',
+  snappId: 'budget-tracker',
   userId: currentUser.id,
-  apiKey: 'wak_your_webapp_api_key',
+  apiKey: 'wak_your_snapp_api_key',
   
   tools: [
     {
@@ -686,7 +686,7 @@ snappjack.on('user-api-key-generated', (event) => {
   // Build MCP configuration from the event data
   const config = {
     connections: [{
-      name: `${connectionData.appId} (${connectionData.userId})`,
+      name: `${connectionData.snappId} (${connectionData.userId})`,
       type: 'streamableHttp',
       url: connectionData.mcpEndpoint,
       headers: {

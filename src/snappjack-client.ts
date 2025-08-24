@@ -13,7 +13,7 @@ import Ajv, { ValidateFunction } from 'ajv';
 
 // Types and Interfaces
 export interface SnappjackConfig {
-  appId: string;
+  snappId: string;
   userId?: string;  // Optional - provided when credentials exist
   userApiKey?: string;  // Optional - provided when credentials exist
   tools?: Tool[];
@@ -120,7 +120,7 @@ type ContentBlock =
 export type ToolResponse = CallToolResult;
 export interface ConnectionData {
   userApiKey: string;
-  appId: string;
+  snappId: string;
   userId: string;
   mcpEndpoint: string;
 }
@@ -201,10 +201,10 @@ export class Snappjack extends EventEmitter {
   private validators: Map<string, ValidateFunction> = new Map();
 
   /**
-   * Static method to create a new user via the webapp's API endpoint
+   * Static method to create a new user via the snapp's API endpoint
    * This should be called before instantiating the Snappjack client
    */
-  static async createUser(createUserEndpoint: string): Promise<{ userId: string; userApiKey: string; appId: string; mcpEndpoint: string }> {
+  static async createUser(createUserEndpoint: string): Promise<{ userId: string; userApiKey: string; snappId: string; mcpEndpoint: string }> {
     const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
     const url = new URL(createUserEndpoint, baseUrl);
     
@@ -249,7 +249,7 @@ export class Snappjack extends EventEmitter {
     };
 
     // Validate required fields from the final, merged config.
-    if (!this.config.appId) {
+    if (!this.config.snappId) {
       throw new Error('App ID is required');
     }
 
@@ -334,10 +334,10 @@ export class Snappjack extends EventEmitter {
 
   private validateConfig(): void {
     this.logger.log('🔧 Snappjack: Validating config...');
-    this.logger.log(`🔧 Snappjack: Using app ID: ${this.config.appId}`);
+    this.logger.log(`🔧 Snappjack: Using app ID: ${this.config.snappId}`);
     this.logger.log(`🔧 Snappjack: Using server URL: ${this.config.serverUrl}`);
     
-    if (!this.config.appId) {
+    if (!this.config.snappId) {
       throw new Error('App ID is required');
     }
     if (!this.config.serverUrl) {
@@ -490,7 +490,7 @@ export class Snappjack extends EventEmitter {
     
     this.logger.log(`🏗️ Snappjack: Using user API key: ${this.userApiKey.substring(0, 8)}...`);
     
-    const wsUrl = `${baseUrl}/ws/${this.config.appId}/${this.config.userId}?apiKey=${this.userApiKey}`;
+    const wsUrl = `${baseUrl}/ws/${this.config.snappId}/${this.config.userId}?apiKey=${this.userApiKey}`;
     this.logger.log(`🏗️ Snappjack: Final WebSocket URL: ${wsUrl}`);
     return wsUrl;
   }
@@ -512,11 +512,11 @@ export class Snappjack extends EventEmitter {
       const baseUrl = this.config.serverUrl
         .replace(/^ws:/, 'http:')
         .replace(/^wss:/, 'https:');
-      const mcpEndpoint = `${baseUrl}/mcp/${this.config.appId}/${this.config.userId || 'unknown'}`;
+      const mcpEndpoint = `${baseUrl}/mcp/${this.config.snappId}/${this.config.userId || 'unknown'}`;
       
       const eventData: ConnectionData = {
         userApiKey: this.userApiKey,
-        appId: this.config.appId,
+        snappId: this.config.snappId,
         userId: this.config.userId || 'unknown',
         mcpEndpoint: mcpEndpoint
       };
@@ -692,7 +692,7 @@ export class Snappjack extends EventEmitter {
         },
         body: JSON.stringify({
           userApiKey: this.userApiKey,
-          webAppId: this.config.appId,
+          snappId: this.config.snappId,
           userId: this.config.userId
         })
       });

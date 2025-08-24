@@ -1,6 +1,6 @@
 /**
  * Snappjack SDK - Server-Side Helper
- * For webapp servers to securely generate user API keys
+ * For snapp servers to securely generate user API keys
  */
 
 import { DEFAULT_SNAPPJACK_SERVER_URL } from './constants';
@@ -25,23 +25,23 @@ const DEFAULT_SERVER_URL = ((): string => {
   return DEFAULT_SNAPPJACK_SERVER_URL;
 })();
 
-const WEB_APP_ID = ((): string => {
-  if (process.env.NEXT_PUBLIC_SNAPPJACK_APP_ID) {
-    return process.env.NEXT_PUBLIC_SNAPPJACK_APP_ID;
+const SNAPP_ID = ((): string => {
+  if (process.env.NEXT_PUBLIC_SNAPPJACK_SNAPP_ID) {
+    return process.env.NEXT_PUBLIC_SNAPPJACK_SNAPP_ID;
   }
-  throw new Error('NEXT_PUBLIC_SNAPPJACK_APP_ID environment variable is required');
+  throw new Error('NEXT_PUBLIC_SNAPPJACK_SNAPP_ID environment variable is required');
 })();
 
-const WEB_APP_API_KEY = ((): string => {
-  if (process.env.SNAPPJACK_APP_API_KEY) {
-    return process.env.SNAPPJACK_APP_API_KEY;
+const SNAPP_API_KEY = ((): string => {
+  if (process.env.SNAPPJACK_SNAPP_API_KEY) {
+    return process.env.SNAPPJACK_SNAPP_API_KEY;
   }
-  throw new Error('SNAPPJACK_APP_API_KEY environment variable is required');
+  throw new Error('SNAPPJACK_SNAPP_API_KEY environment variable is required');
 })();
 
 export interface ServerConfig {
   snappjackAppApiKey: string;
-  webAppId: string;
+  snappId: string;
   snappjackServerUrl?: string;
 }
 
@@ -56,7 +56,7 @@ export interface UserApiKeyResponse {
 export interface CreateUserResponse {
   userId: string;
   userApiKey: string;
-  appId: string;
+  snappId: string;
   mcpEndpoint: string;
   createdAt: string;
 }
@@ -77,8 +77,8 @@ export class SnappjackServerHelper {
       throw new Error('snappjackAppApiKey is required');
     }
 
-    if (!config.webAppId) {
-      throw new Error('webAppId is required');
+    if (!config.snappId) {
+      throw new Error('snappId is required');
     }
 
     if (!config.snappjackAppApiKey.match(/^wak_[a-f0-9]{16}$/)) {
@@ -96,7 +96,7 @@ export class SnappjackServerHelper {
    * This is the primary method for user creation in the new flow
    */
   async createUser(): Promise<CreateUserResponse> {
-    const url = `${this.config.snappjackServerUrl}/api/webapp/${encodeURIComponent(this.config.webAppId)}/users`;
+    const url = `${this.config.snappjackServerUrl}/api/snapp/${encodeURIComponent(this.config.snappId)}/users`;
     
     const response = await fetch(url, {
       method: 'POST',
@@ -118,7 +118,7 @@ export class SnappjackServerHelper {
 
   /**
    * Generate a user API key for the specified Snappjack app and user
-   * This should be called from your webapp's API route
+   * This should be called from your snapp's API route
    * @deprecated Use createUser() instead for the new flow
    */
   async generateUserApiKey(snappjackAppId: string, userId: string): Promise<UserApiKeyResponse> {
@@ -150,7 +150,7 @@ export class SnappjackServerHelper {
   }
 
   /**
-   * Utility method for webapp developers to create a simple API route handler
+   * Utility method for snapp developers to create a simple API route handler
    * Usage in Next.js: export const GET = createTokenHandler(snappjackHelper, options);
    */
   createTokenHandler(options: ServerValidationOptions = {}) {
@@ -275,8 +275,8 @@ export class SnappjackServerHelper {
 // Simplified handler for creating new users via API route
 export function createUserHandler() {
   const helper = new SnappjackServerHelper({ 
-    snappjackAppApiKey: WEB_APP_API_KEY,
-    webAppId: WEB_APP_ID
+    snappjackAppApiKey: SNAPP_API_KEY,
+    snappId: SNAPP_ID
   });
 
   return {
