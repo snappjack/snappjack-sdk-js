@@ -14,14 +14,13 @@ import Ajv, { ValidateFunction } from 'ajv';
 // Types and Interfaces
 export interface SnappjackConfig {
   snappId: string;
-  userId?: string;  // Optional - provided when credentials exist
-  userApiKey?: string;  // Optional - provided when credentials exist
+  userId: string;
+  userApiKey: string;
   tools?: Tool[];
   autoReconnect?: boolean;
   reconnectInterval?: number;
   maxReconnectAttempts?: number;
   logger?: Logger;
-  serverUrl?: string;
 }
 
 export interface Logger {
@@ -187,7 +186,7 @@ export type IncomingMessage = ToolCallMessage | AgentMessage | { type: string; [
 
 
 export class Snappjack extends EventEmitter {
-  private config: Required<Omit<SnappjackConfig, 'userId' | 'userApiKey'>> & { userId?: string; userApiKey?: string };
+  private config: Required<SnappjackConfig> & { serverUrl: string };
   private ws: WebSocket | null = null;
   private status: SnappjackStatus = 'disconnected';
   private tools: Map<string, Tool> = new Map();
@@ -227,9 +226,14 @@ export class Snappjack extends EventEmitter {
   constructor(config: SnappjackConfig) {
     super();
 
+    // Get server URL from environment or use default
+    const serverUrl = (typeof process !== 'undefined' && process.env && process.env.NEXT_PUBLIC_SNAPPJACK_SERVER_URL) 
+      ? process.env.NEXT_PUBLIC_SNAPPJACK_SERVER_URL 
+      : DEFAULT_SNAPPJACK_SERVER_URL;
+
     // Define all defaults in one place.
     const defaultConfig = {
-      serverUrl: DEFAULT_SNAPPJACK_SERVER_URL,
+      serverUrl: serverUrl,
       autoReconnect: true,
       reconnectInterval: 5000,
       maxReconnectAttempts: 10,
@@ -253,13 +257,8 @@ export class Snappjack extends EventEmitter {
       throw new Error('App ID is required');
     }
 
-    // Store userId and userApiKey if provided
-    if (this.config.userId) {
-      this.config.userId = this.config.userId;
-    }
-    if (this.config.userApiKey) {
-      this.userApiKey = this.config.userApiKey;
-    }
+    // Store userApiKey for internal use
+    this.userApiKey = this.config.userApiKey;
 
     // Perform any necessary transformations on the final config values.
     // we expect the server url to be http or https so validate it first
@@ -393,11 +392,6 @@ export class Snappjack extends EventEmitter {
       return;
     }
 
-    // Require both userId and userApiKey for connection
-    if (!this.config.userId || !this.userApiKey) {
-      throw new Error('userId and userApiKey are required for connection. Create a new user first or provide existing credentials.');
-    }
-    
     this.logger.log(`🔑 Snappjack: Using user API key: ${this.userApiKey}`);
     this.logger.log(`🔑 Snappjack: Using user ID: ${this.config.userId}`);
 
@@ -974,35 +968,6 @@ export class Snappjack extends EventEmitter {
     return this.status;
   }
 
-  /**
-   * Reset current credentials and allow new ones to be set
-   * This should be called when auth fails and user wants to get new credentials
-   */
-  public resetCredentials(): void {
-    this.userApiKey = null;
-    this.config.userId = undefined;
-    this.config.userApiKey = undefined;
-    
-    // Disconnect if currently connected
-    if (this.ws) {
-      this.disconnect();
-    }
-    
-    this.updateStatus('disconnected');
-    this.logger.log('🔄 Snappjack: Credentials reset');
-  }
-
-  /**
-   * Update credentials and attempt to connect
-   * This should be called after getting new credentials
-   */
-  public setCredentials(userId: string, userApiKey: string): void {
-    this.config.userId = userId;
-    this.config.userApiKey = userApiKey;
-    this.userApiKey = userApiKey;
-    
-    this.logger.log('🔑 Snappjack: New credentials set');
-  }
 
   private sendToolResponse(requestId: string | number, result: ToolResponse): void {
     try {
