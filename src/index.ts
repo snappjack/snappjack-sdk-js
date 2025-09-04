@@ -5,3 +5,4 @@ export { default } from './snappjack-client';
 // Export cross-platform utilities
 export * from './event-emitter';
 export * from './websocket-wrapper';
+export * from './server';

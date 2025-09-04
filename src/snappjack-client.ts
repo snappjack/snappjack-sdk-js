@@ -4,6 +4,9 @@
  * 
  * The zero-pain way to enable your app for the AI era, letting users put their 
  * personal assistants to work directly within their live app session.
+ * 
+ * Supports ephemeral JWT token authentication:
+ * Your app server generates ephemeral tokens using SnappjackServerHelper and passes them to the client
  */
 
 import { EventEmitter, EventListener } from './event-emitter';
@@ -15,7 +18,8 @@ import Ajv, { ValidateFunction } from 'ajv';
 export interface SnappjackConfig {
   snappId: string;
   userId: string;
-  userApiKey: string;
+  ephemeralToken: string;  // Required: JWT token for WebSocket authentication
+  
   tools?: Tool[];
   autoReconnect?: boolean;
   reconnectInterval?: number;
@@ -185,16 +189,49 @@ export type IncomingMessage = ToolCallMessage | AgentMessage | { type: string; [
 
 
 
+// Internal config type
+type InternalConfig = Required<SnappjackConfig> & { 
+  serverUrl: string; 
+};
+
+/**
+ * Snappjack SDK Client
+ * 
+ * Authentication flow:
+ * 
+ * 1. Your app server uses SnappjackServerHelper to generate ephemeral JWT tokens
+ * 2. Pass the token to the client constructor:
+ * 
+ * ```typescript
+ * const client = new Snappjack({
+ *   snappId: 'your-snapp-id',
+ *   userId: 'user-123', 
+ *   ephemeralToken: 'jwt-token-from-your-server',
+ *   tools: [...]
+ * });
+ * ```
+ * 
+ * **Alternative: Direct userApiKey authentication:**
+ * ```typescript
+ * const client = new Snappjack({
+ *   snappId: 'your-snapp-id',
+ *   userId: 'user-123',
+ *   userApiKey: 'uak_...', 
+ *   tools: [...]
+ * });
+ * ```
+ * Use when you have a persistent userApiKey (less secure than ephemeral tokens).
+ */
 export class Snappjack extends EventEmitter {
-  private config: Required<SnappjackConfig> & { serverUrl: string };
+  private config: InternalConfig;
   private ws: WebSocket | null = null;
   private status: SnappjackStatus = 'disconnected';
   private tools: Map<string, Tool> = new Map();
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectAttempts = 0;
   private currentAgentSessionId: string | null = null;
-  private userApiKey: string | null = null;
   private lastToolCallAgentSessionId: string | undefined;
+  private receivedUserApiKey: string | null = null;
   private logger: Logger;
   private ajv: Ajv;
   private validators: Map<string, ValidateFunction> = new Map();
@@ -257,8 +294,10 @@ export class Snappjack extends EventEmitter {
       throw new Error('App ID is required');
     }
 
-    // Store userApiKey for internal use
-    this.userApiKey = this.config.userApiKey;
+    // Validate authentication configuration: ephemeralToken is required
+    if (!this.config.ephemeralToken) {
+      throw new Error('ephemeralToken is required for WebSocket authentication');
+    }
 
     // Perform any necessary transformations on the final config values.
     // we expect the server url to be http or https so validate it first
@@ -385,6 +424,7 @@ export class Snappjack extends EventEmitter {
     }
   }
 
+
   public async connect(): Promise<void> {
     this.logger.log('🔌 Snappjack: Starting connection...');
     if (this.ws && this.ws.readyState === ReadyState.OPEN) {
@@ -392,7 +432,9 @@ export class Snappjack extends EventEmitter {
       return;
     }
 
-    this.logger.log(`🔑 Snappjack: Using user API key: ${this.userApiKey}`);
+    // Use provided ephemeral token
+    this.logger.log('🔐 Snappjack: Using provided ephemeral token for WebSocket authentication');
+    
     this.logger.log(`🔑 Snappjack: Using user ID: ${this.config.userId}`);
 
     return new Promise((resolve, reject) => {
@@ -477,15 +519,12 @@ export class Snappjack extends EventEmitter {
       this.logger.log(`🏗️ Snappjack: Removed trailing slash: ${baseUrl}`);
     }
     
-    // Use user API key (required)
-    if (!this.userApiKey) {
-      throw new Error('User API key is required for WebSocket connection');
-    }
+    // Use provided ephemeral JWT token for WebSocket authentication
+    const authToken = this.config.ephemeralToken;
+    this.logger.log(`🏗️ Snappjack: Using provided ephemeral JWT token`);
     
-    this.logger.log(`🏗️ Snappjack: Using user API key: ${this.userApiKey.substring(0, 8)}...`);
-    
-    const wsUrl = `${baseUrl}/ws/${this.config.snappId}/${this.config.userId}?apiKey=${this.userApiKey}`;
-    this.logger.log(`🏗️ Snappjack: Final WebSocket URL: ${wsUrl}`);
+    const wsUrl = `${baseUrl}/ws/${this.config.snappId}/${this.config.userId}?token=${authToken}`;
+    this.logger.log(`🏗️ Snappjack: Final WebSocket URL: ${wsUrl.replace(authToken, '[REDACTED]')}`);
     return wsUrl;
   }
 
@@ -499,27 +538,8 @@ export class Snappjack extends EventEmitter {
     this.logger.log('🛠️ Snappjack: Sending tools registration...');
     this.sendToolsRegistration();
     
-    // Emit user API key event if we have one
-    if (this.userApiKey) {
-      this.logger.log('🔑 Snappjack: Emitting user-api-key-generated event');
-      // Build MCP endpoint URL using the configured server URL
-      const baseUrl = this.config.serverUrl
-        .replace(/^ws:/, 'http:')
-        .replace(/^wss:/, 'https:');
-      const mcpEndpoint = `${baseUrl}/mcp/${this.config.snappId}/${this.config.userId || 'unknown'}`;
-      
-      const eventData: ConnectionData = {
-        userApiKey: this.userApiKey,
-        snappId: this.config.snappId,
-        userId: this.config.userId || 'unknown',
-        mcpEndpoint: mcpEndpoint
-      };
-      this.logger.log(`🔑 Snappjack: Event data: ${JSON.stringify(eventData)}`);
-      this.emit('user-api-key-generated', eventData);
-    } else {
-      this.logger.log('⚠️ Snappjack: No user API key available for event');
-    }
     this.logger.log('✅ Snappjack: Connection handling complete');
+    this.logger.log('⏳ Snappjack: Waiting for connection info message from server...');
   }
 
   private sendToolsRegistration(): void {
@@ -546,7 +566,10 @@ export class Snappjack extends EventEmitter {
       this.logger.log(`📨 Snappjack: Parsed message: ${JSON.stringify(message)}`);
       
       // Handle router messages
-      if (message.type === 'agent-connected') {
+      if (message.type === 'connection-info') {
+        this.logger.log('🔗 Snappjack: Handling connection-info message');
+        this.handleConnectionInfo(message);
+      } else if (message.type === 'agent-connected') {
         this.logger.log('🤖 Snappjack: Handling agent-connected message');
         this.handleAgentConnected(message);
       } else if (message.type === 'agent-disconnected') {
@@ -571,7 +594,7 @@ export class Snappjack extends EventEmitter {
     
     // For ambiguous codes like 1006, use credential validation to determine the real cause
     let error: SnappjackError;
-    if (code === 1006 && this.config.userId && this.userApiKey) {
+    if (code === 1006 && this.config.userId && this.receivedUserApiKey) {
       // 1006 is ambiguous - could be auth failure or connection issue
       const validationResult = await this.validateCredentials();
       
@@ -635,7 +658,7 @@ export class Snappjack extends EventEmitter {
 
   private async classifyWebSocketError(): Promise<SnappjackError> {
     // If we have credentials, validate them to determine the error type
-    if (this.config.userId && this.userApiKey) {
+    if (this.config.userId && this.receivedUserApiKey) {
       const validationResult = await this.validateCredentials();
       
       switch (validationResult) {
@@ -685,7 +708,7 @@ export class Snappjack extends EventEmitter {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          userApiKey: this.userApiKey,
+          userApiKey: this.receivedUserApiKey,
           snappId: this.config.snappId,
           userId: this.config.userId
         })
@@ -782,6 +805,33 @@ export class Snappjack extends EventEmitter {
       this.logger.log('🤖 Snappjack: Different agent disconnected, keeping current status');
     }
     this.emit('agent-disconnected', { agentSessionId: message.agentSessionId });
+  }
+
+  private handleConnectionInfo(message: any): void {
+    this.logger.log(`🔗 Snappjack: Received connection info with userApiKey: ${message.userApiKey ? 'present' : 'missing'}`);
+    
+    if (message.userApiKey) {
+      this.receivedUserApiKey = message.userApiKey;
+      this.logger.log('🔑 Snappjack: Emitting user-api-key-generated event');
+      
+      // Build MCP endpoint URL using the configured server URL
+      const baseUrl = this.config.serverUrl
+        .replace(/^ws:/, 'http:')
+        .replace(/^wss:/, 'https:');
+      const mcpEndpoint = `${baseUrl}/mcp/${this.config.snappId}/${this.config.userId}`;
+      
+      const eventData: ConnectionData = {
+        userApiKey: this.receivedUserApiKey!,
+        snappId: this.config.snappId,
+        userId: this.config.userId,
+        mcpEndpoint: mcpEndpoint
+      };
+      
+      this.logger.log(`🔑 Snappjack: Event data: ${JSON.stringify(eventData)}`);
+      this.emit('user-api-key-generated', eventData);
+    } else {
+      this.logger.warn('⚠️ Snappjack: Connection info message missing userApiKey');
+    }
   }
 
   private async handleToolCall(message: ToolCallMessage): Promise<void> {

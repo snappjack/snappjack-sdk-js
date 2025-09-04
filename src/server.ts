@@ -26,6 +26,13 @@ export interface CreateUserResponse {
   createdAt: string;
 }
 
+export interface EphemeralTokenResponse {
+  token: string;
+  expiresAt: number;
+  snappId: string;
+  userId: string;
+}
+
 export interface ServerValidationOptions {
   validateSnappjackAppId?: (snappjackAppId: string) => boolean | Promise<boolean>;
   validateUserId?: (userId: string) => boolean | Promise<boolean>;
@@ -83,6 +90,36 @@ export class SnappjackServerHelper {
     }
 
     const data = await response.json() as CreateUserResponse;
+    return data;
+  }
+
+  /**
+   * Generate an ephemeral JWT token for WebSocket authentication
+   * This token expires in 10 seconds and should be used immediately
+   */
+  async generateEphemeralToken(userId: string): Promise<EphemeralTokenResponse> {
+    if (!userId || typeof userId !== 'string') {
+      throw new Error('userId must be a non-empty string');
+    }
+
+    const url = `${this.config.snappjackServerUrl}/api/snapp/${encodeURIComponent(this.config.snappId)}/ephemeral-token`;
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.config.snappApiKey}`,
+        'Content-Type': 'application/json',
+        'User-Agent': 'SnappjackSDK-Server/1.0'
+      },
+      body: JSON.stringify({ userId })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Unknown error');
+      throw new Error(`Failed to generate ephemeral token: ${response.status} ${response.statusText}. ${errorText}`);
+    }
+
+    const data = await response.json() as EphemeralTokenResponse;
     return data;
   }
 
@@ -260,6 +297,48 @@ export function createUserHandler(config: ServerConfig) {
         });
       } catch (error) {
         console.error('Snappjack user creation error:', error);
+        
+        return new Response(JSON.stringify({ 
+          error: error instanceof Error ? error.message : 'Internal server error' 
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+    }
+  };
+}
+
+// Simplified handler for generating ephemeral tokens via API route
+export function createEphemeralTokenHandler(config: ServerConfig) {
+  const helper = new SnappjackServerHelper(config);
+
+  return {
+    POST: async (request: Request): Promise<Response> => {
+      try {
+        const body = await request.json();
+        const { userId } = body;
+
+        if (!userId || typeof userId !== 'string') {
+          return new Response(JSON.stringify({ 
+            error: 'userId is required in request body' 
+          }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+
+        const result = await helper.generateEphemeralToken(userId);
+        
+        return new Response(JSON.stringify(result), {
+          status: 200,
+          headers: { 
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache, no-store, must-revalidate'
+          }
+        });
+      } catch (error) {
+        console.error('Snappjack ephemeral token error:', error);
         
         return new Response(JSON.stringify({ 
           error: error instanceof Error ? error.message : 'Internal server error' 
