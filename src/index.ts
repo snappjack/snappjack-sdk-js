@@ -1,8 +1,13 @@
-// Re-export everything from the main SDK file
-export * from './snappjack-client';
-export { default } from './snappjack-client';
+/**
+ * @deprecated This unified entry point is deprecated.
+ * 
+ * Please use the explicit entry points instead:
+ * - Client-side: import from '@snappjack/sdk-js/client'
+ * - Server-side: import from '@snappjack/sdk-js/server'
+ * 
+ * This file now defaults to client-only exports for minimal backward compatibility,
+ * but will be removed in a future version.
+ */
 
-// Export cross-platform utilities
-export * from './event-emitter';
-export * from './websocket-wrapper';
-export * from './server';
+// Default to client exports for backward compatibility
+export * from './client';

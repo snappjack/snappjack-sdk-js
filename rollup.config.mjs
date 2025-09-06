@@ -39,17 +39,40 @@ export default [
       })
     ]
   },
-  // ES module build - use index.ts which exports everything
+  // Client-side ES module build
   {
-    input: 'src/index.ts',
+    input: 'src/client.ts',
     output: {
-      file: 'dist/index.mjs',
+      file: 'dist/client.mjs',
       format: 'es',
       sourcemap: true
     },
     plugins: [
       nodeResolve({
         browser: true
+      }),
+      commonjs(),
+      json(),
+      typescript({
+        tsconfig: './tsconfig.json',
+        declaration: false,
+        declarationMap: false,
+        module: 'ESNext'
+      })
+    ]
+  },
+  // Client-side CommonJS build for Node.js
+  {
+    input: 'src/client.ts',
+    output: {
+      file: 'dist/client.js',
+      format: 'cjs',
+      sourcemap: true
+    },
+    plugins: [
+      nodeResolve({
+        browser: false,
+        preferBuiltins: true
       }),
       commonjs(),
       json(),

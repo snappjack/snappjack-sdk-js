@@ -2,22 +2,35 @@
   "name": "@snappjack/sdk-js",
   "version": "0.2.0",
   "description": "TypeScript SDK for Snappjack - Enable your app for AI agents with secure JWT authentication",
-  "main": "dist/index.js",
-  "module": "dist/index.mjs",
-  "types": "dist/index.d.ts",
+  "main": "dist/client.js",
+  "module": "dist/client.mjs",
+  "types": "dist/client.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
+      "types": "./dist/client.d.ts",
       "browser": {
-        "import": "./dist/index.mjs",
+        "import": "./dist/client.mjs",
         "require": "./dist/snappjack-sdk.js"
       },
       "node": {
-        "import": "./dist/index.mjs",
-        "require": "./dist/index.js"
+        "import": "./dist/client.mjs",
+        "require": "./dist/client.js"
       },
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "import": "./dist/client.mjs",
+      "require": "./dist/client.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "browser": {
+        "import": "./dist/client.mjs",
+        "require": "./dist/snappjack-sdk.js"
+      },
+      "node": {
+        "import": "./dist/client.mjs",
+        "require": "./dist/client.js"
+      },
+      "import": "./dist/client.mjs",
+      "require": "./dist/client.js"
     },
     "./server": {
       "types": "./dist/server.d.ts",
