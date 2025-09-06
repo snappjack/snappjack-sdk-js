@@ -5,6 +5,19 @@
 
 import { DEFAULT_SNAPPJACK_SERVER_URL } from './constants';
 
+// HTTP-first error for simpler error handling
+export class SnappjackHttpError extends Error {
+  public status: number;
+  public body: any;
+
+  constructor(message: string, status: number, body: any) {
+    super(message);
+    this.name = 'SnappjackHttpError';
+    this.status = status;
+    this.body = body;
+  }
+}
+
 export interface ServerConfig {
   snappApiKey: string;
   snappId: string;
@@ -86,7 +99,21 @@ export class SnappjackServerHelper {
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'Unknown error');
-      throw new Error(`Failed to create user: ${response.status} ${response.statusText}. ${errorText}`);
+      
+      // Try to parse JSON, but always include HTTP context
+      let errorBody;
+      try {
+        errorBody = JSON.parse(errorText);
+      } catch (parseError) {
+        // If JSON parsing fails, create simple error body
+        errorBody = { error: `Failed to create user: ${response.status} ${response.statusText}` };
+      }
+      
+      throw new SnappjackHttpError(
+        errorBody.error || `Failed to create user: ${response.status} ${response.statusText}`,
+        response.status,
+        errorBody
+      );
     }
 
     const data = await response.json() as CreateUserResponse;
@@ -116,7 +143,21 @@ export class SnappjackServerHelper {
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'Unknown error');
-      throw new Error(`Failed to generate ephemeral token: ${response.status} ${response.statusText}. ${errorText}`);
+      
+      // Try to parse JSON, but always include HTTP context
+      let errorBody;
+      try {
+        errorBody = JSON.parse(errorText);
+      } catch (parseError) {
+        // If JSON parsing fails, create simple error body
+        errorBody = { error: `Failed to generate ephemeral token: ${response.status} ${response.statusText}` };
+      }
+      
+      throw new SnappjackHttpError(
+        errorBody.error || `Failed to generate ephemeral token: ${response.status} ${response.statusText}`,
+        response.status,
+        errorBody
+      );
     }
 
     const data = await response.json() as EphemeralTokenResponse;
