@@ -45,7 +45,7 @@ import {
  * const client = new Snappjack({
  *   snappId: 'your-snapp-id',
  *   userId: 'user-123', 
- *   ephemeralToken: 'jwt-token-from-your-server',
+ *   tokenProvider: async () => await getTokenFromServer(),
  *   tools: [...]
  * });
  * ```
@@ -118,9 +118,9 @@ export class Snappjack extends EventEmitter {
       throw new Error('App ID is required');
     }
 
-    // Validate authentication configuration: ephemeralToken is required
-    if (!this.config.ephemeralToken) {
-      throw new Error('ephemeralToken is required for WebSocket authentication');
+    // Validate authentication configuration: tokenProvider is required
+    if (!this.config.tokenProvider || typeof this.config.tokenProvider !== 'function') {
+      throw new Error('tokenProvider function is required for WebSocket authentication');
     }
 
     // Perform any necessary transformations on the final config values
@@ -171,7 +171,7 @@ export class Snappjack extends EventEmitter {
     return {
       snappId: this.config.snappId,
       userId: this.config.userId,
-      ephemeralToken: this.config.ephemeralToken,
+      tokenProvider: this.config.tokenProvider,
       serverUrl: this.config.serverUrl,
       autoReconnect: this.config.autoReconnect,
       reconnectInterval: this.config.reconnectInterval,
@@ -521,6 +521,23 @@ export class Snappjack extends EventEmitter {
     } catch (error) {
       this.logger.error(`❌ Failed to send error response: ${error instanceof Error ? error.message : String(error)}`);
       this.emit('error', error);
+    }
+  }
+
+  /**
+   * Force disconnect the currently connected agent
+   * This allows the snapp to terminate an agent session when needed
+   */
+  public forceDisconnectAgent(): void {
+    try {
+      this.connectionManager.send({
+        type: 'force-disconnect-agent'
+      });
+      this.logger.log('🔌 Snappjack: Sent force disconnect agent message');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`❌ Snappjack: Failed to force disconnect agent: ${errorMessage}`);
+      throw new Error(`Failed to force disconnect agent: ${errorMessage}`);
     }
   }
 

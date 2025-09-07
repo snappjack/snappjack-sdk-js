@@ -12,7 +12,7 @@
 export interface SnappjackConfig {
   snappId: string;
   userId: string;
-  ephemeralToken: string;  // Required: JWT token for WebSocket authentication
+  tokenProvider: () => Promise<string>;  // Function to get fresh JWT tokens
   
   tools?: Tool[];
   autoReconnect?: boolean;
@@ -190,6 +190,10 @@ export interface ToolRegistrationMessage {
   tools: ToolDefinition[];
 }
 
+export interface ForceDisconnectAgentMessage {
+  type: 'force-disconnect-agent';
+}
+
 export interface AgentMessage {
   type: 'agent-connected' | 'agent-disconnected';
   agentSessionId: string;
@@ -202,7 +206,7 @@ export interface ConnectionInfoMessage {
 }
 
 // Union type for all WebSocket messages
-export type WebSocketMessage = JsonRpcResponse | ToolRegistrationMessage;
+export type WebSocketMessage = JsonRpcResponse | ToolRegistrationMessage | ForceDisconnectAgentMessage;
 
 // Union type for all incoming messages
 export type IncomingMessage = ToolCallMessage | AgentMessage | ConnectionInfoMessage | { type: string; [key: string]: unknown };
@@ -226,9 +230,10 @@ export interface ValidationResult {
 export interface ConnectionConfig {
   snappId: string;
   userId: string;
-  ephemeralToken: string;
+  tokenProvider: () => Promise<string>;
   serverUrl: string;
   autoReconnect: boolean;
   reconnectInterval: number;
   maxReconnectAttempts: number;
+  testMode?: boolean; // For fast test execution - uses 1ms reconnect delays
 }
