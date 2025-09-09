@@ -31,6 +31,14 @@ export interface CreateUserResponse {
   createdAt: string;
 }
 
+export interface RegisterUserResponse {
+  userId: string;
+  userApiKey: string;
+  snappId: string;
+  mcpEndpoint: string;
+  createdAt: string;
+}
+
 export interface EphemeralTokenResponse {
   token: string;
   expiresAt: number;
@@ -117,6 +125,22 @@ export class SnappjackServerHelper {
     return this._makeRequest<CreateUserResponse>('POST', path);
   }
 
+    /**
+   * Register a user with a client-provided userId
+   * This is the new primary method for user registration
+   * @param userId - The client-provided user ID to register
+   * @returns Promise with registration result or throws on conflict/error
+   */
+    async registerUser(userId: string): Promise<RegisterUserResponse> {
+      if (!userId || typeof userId !== 'string') {
+        throw new Error('userId must be a non-empty string');
+      }
+  
+      const path = `/api/snapp/${encodeURIComponent(this.config.snappId)}/users/${encodeURIComponent(userId)}/register`;
+      return this._makeRequest<RegisterUserResponse>('POST', path);
+    }
+    
+
   /**
    * Generate an ephemeral JWT token for WebSocket authentication
    * This token expires in 10 seconds and should be used immediately
@@ -129,7 +153,7 @@ export class SnappjackServerHelper {
     const path = `/api/snapp/${encodeURIComponent(this.config.snappId)}/ephemeral-token`;
     return this._makeRequest<EphemeralTokenResponse>('POST', path, { userId });
   }
-
+  
 
   /**
    * Test connection to Snappjack server with current configuration
