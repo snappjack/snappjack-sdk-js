@@ -143,6 +143,7 @@ export interface ConnectionData {
   snappId: string;
   userId: string;
   mcpEndpoint: string;
+  requireAuthHeader?: boolean;
 }
 
 export type SnappjackStatus = 'disconnected' | 'connected' | 'bridged' | 'error';

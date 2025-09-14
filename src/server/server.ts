@@ -77,7 +77,7 @@ export class SnappjackServerHelper {
    * Private method to centralize all API request logic
    */
   private async _makeRequest<T>(
-    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
     path: string,
     body?: any
   ): Promise<T> {
@@ -153,7 +153,31 @@ export class SnappjackServerHelper {
     const path = `/api/snapp/${encodeURIComponent(this.config.snappId)}/ephemeral-token`;
     return this._makeRequest<EphemeralTokenResponse>('POST', path, { userId });
   }
-  
+
+  /**
+   * Update authentication requirement for a specific user
+   * @param userId - The user ID to update
+   * @param requireAuthHeader - Whether to require Bearer token authentication
+   * @returns Promise with update result
+   */
+  async updateAuthRequirement(userId: string, requireAuthHeader: boolean): Promise<{
+    snappId: string;
+    userId: string;
+    requireAuthHeader: boolean;
+    updatedAt: string;
+  }> {
+    if (!userId || typeof userId !== 'string') {
+      throw new Error('userId must be a non-empty string');
+    }
+
+    if (typeof requireAuthHeader !== 'boolean') {
+      throw new Error('requireAuthHeader must be a boolean');
+    }
+
+    const path = `/api/snapp/${encodeURIComponent(this.config.snappId)}/users/${encodeURIComponent(userId)}/auth-requirement`;
+    return this._makeRequest('PATCH', path, { requireAuthHeader });
+  }
+
 
   /**
    * Test connection to Snappjack server with current configuration

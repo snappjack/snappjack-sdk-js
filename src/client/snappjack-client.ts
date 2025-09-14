@@ -336,7 +336,7 @@ export class Snappjack extends EventEmitter {
     this.logger.log(`🔗 Snappjack: Received connection info with userApiKey: ${message.userApiKey ? 'present' : 'missing'}`);
     
     if (message.userApiKey) {
-      this.logger.log('🔑 Snappjack: Emitting user-api-key-generated event');
+      this.logger.log('🔑 Snappjack: Emitting connection-info-updated event');
       
       // Build MCP endpoint URL using the configured server URL
       const baseUrl = this.config.serverUrl
@@ -348,10 +348,13 @@ export class Snappjack extends EventEmitter {
         userApiKey: message.userApiKey,
         snappId: this.config.snappId,
         userId: this.config.userId,
-        mcpEndpoint: mcpEndpoint
+        mcpEndpoint: mcpEndpoint,
+        requireAuthHeader: message.requireAuthHeader ?? true
       };
       
       this.logger.log(`🔑 Snappjack: Event data: ${JSON.stringify(eventData)}`);
+      this.emit('connection-info-updated', eventData);
+      // Keep backward compatibility
       this.emit('user-api-key-generated', eventData);
     } else {
       this.logger.warn('⚠️ Snappjack: Connection info message missing userApiKey');
