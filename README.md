@@ -1,61 +1,36 @@
-# Snappjack SDK Documentation
+# Snappjack SDK
 
-Transform your UI into a UAI. Enable your app for agents. In a snap.
+[![npm version](https://badge.fury.io/js/%40snappjack%2Fsdk-js.svg)](https://badge.fury.io/js/%40snappjack%2Fsdk-js)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Introduction
+Expose your application's functionality as tools for AI agents through a real-time, stateful connection.
 
-Your app has a beautiful User Interface (UI) that your users love. But their new AI assistants can't use it. Snappjack transforms your existing UI into a **User & Agent Interface (UAI)** by adding a real-time connection layer that lets AI assistants operate your app on behalf of users.
+## Overview
 
-### What Changes When You Add Snappjack?
+The Snappjack SDK enables you to turn your web application into a **Snapp** - an application that AI agents can control on behalf of users. Unlike traditional APIs, the SDK creates a persistent, real-time bridge between your front-end application and AI agents, allowing agents to interact with the same live application instance that users are viewing.
 
-**Nothing visible to your users.** Your app looks and works exactly the same. But now:
-
-- Users can connect their AI assistants (Claude, GPT, or any MCP-compatible agent)
-- Assistants can perform actions in your app based on natural language requests
-- Users see results instantly in your existing UI
-- You maintain complete control over what assistants can and cannot do
+When you integrate the Snappjack SDK, your application becomes controllable by AI while remaining unchanged for your users. Users can connect their preferred AI assistant (Claude, ChatGPT, or any MCP-compatible agent) to perform actions in your app through natural language requests.
 
 ### Architecture Overview
 
 ```text
 ┌─────────────────┐     ┌─────────────────┐     ┌──────────────────┐
-│   Your App UI   │────▶│   Snappjack     │────▶│ User's Assistant │
-│  (unchanged)    │◀────│    Bridge       │◀────│    (Claude,      │
+│   Your App      │────▶│   Snappjack     │────▶│ User's Assistant │
+│   (Client)      │◀────│    Bridge       │◀────│    (Claude,      │
 │                 │     │                 │     │     GPT, etc)    │
 └─────────────────┘     └─────────────────┘     └──────────────────┘
        ↑                                                   ↑
-       └────────────── User sees results ──────────────────┘
-                      Assistant performs actions
+       └────────────── Real-time sync ─────────────────────┘
+                      Same app instance
 ```
 
-## Core Concepts
+## Prerequisites
 
-### Tools: Your App's Agent Vocabulary
+Before you begin, you need:
 
-Tools are the actions your app exposes to AI assistants. Think of them as API endpoints, but designed for AI rather than developers. Each tool:
-
-- Has a **name** that identifies the action
-- Includes a **description** that helps AI understand when to use it
-- Defines **input parameters** the AI must provide
-- Returns **results** in a format AI can understand
-
-Tools follow the [Model Context Protocol (MCP) specification](https://modelcontextprotocol.io/docs/concepts/tools).
-
-### The Connection Lifecycle
-
-1. **User Opens Your App** → Your app initializes Snappjack
-2. **Snappjack Connects** → Establishes secure channel to the bridge
-3. **User Connects Assistant** → Assistant can now see available tools
-4. **Assistant Calls Tools** → Based on user's natural language requests
-5. **Your App Responds** → Results appear in your UI instantly
-
-### Security Model
-
-- **User-Scoped**: Each user's assistant only accesses their own data
-- **Permission-Based**: You control exactly what tools are available
-- **Sandboxed**: Assistants can't access anything you don't explicitly expose
-- **Authenticated**: Both your app and the user's assistant must authenticate
-- **Flexible Authentication**: Users can optionally disable Bearer token requirements for MCP connections while maintaining other security boundaries
+1. **Snappjack Account**: Sign up at [snappjack.com](https://snappjack.com)
+2. **Snapp ID**: A unique identifier for your application that you get from your snappjack dashboard
+3. **Snapp API Key**: Your secret API key starting with `wak_` (keep this secure on your server)
 
 ## Installation
 
@@ -74,93 +49,383 @@ import { SnappjackServerHelper } from '@snappjack/sdk-js/server';
 
 ### Using CDN (Browser)
 
-For browser-only usage, load from the official CDN:
+For browser-only usage, you can serve the built browser version from your own server or use a CDN that hosts npm packages:
 
 ```html
-<script src="https://bridge.snappjack.com/sdk/snappjack.js"></script>
+<!-- Option 1: Serve from your own server -->
+<script src="/path/to/snappjack-sdk.min.js"></script>
+
+<!-- Option 2: Use a CDN like unpkg -->
+<script src="https://unpkg.com/@snappjack/sdk-js@latest/dist/snappjack-sdk.min.js"></script>
 ```
 
-The SDK automatically detects the server URL from where it's loaded, enabling seamless cross-domain support.
+## Getting Started: 5-Minute Example
 
-## Quick Start
+This minimal example demonstrates all four components of the Snappjack ecosystem working together. You'll build a simple web page that AI agents can control.
 
-```typescript
-// First, set up your server-side token provider
-async function getEphemeralToken(snappId: string, userId: string): Promise<string> {
-  // Call your server endpoint that uses SnappjackServerHelper
-  const response = await fetch('/api/snappjack/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ snappId, userId })
-  });
-  const { token } = await response.json();
-  return token;
-}
+### Step 1: The Secure Backend
 
-// Transform your UI into a UAI
-const snappjack = new Snappjack({
-  snappId: 'your-snapp-id',
-  userId: currentUser.id,
-  tokenProvider: () => getEphemeralToken('your-snapp-id', currentUser.id),
+Create a server that handles user management, authentication tokens, and serves the SDK. The secret `snappApiKey` must never be exposed client-side.
 
-  tools: [
-    {
-      name: 'update_budget',
-      description: 'Update budget categories and amounts',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          category: { type: 'string' },
-          amount: { type: 'number' }
-        },
-        required: ['category', 'amount']
-      },
-      handler: async (args) => {
-        // Your existing app logic
-        await updateBudgetCategory(args.category, args.amount);
+```javascript
+// server.js (Express.js example)
+const express = require('express');
+const { SnappjackServerHelper } = require('@snappjack/sdk-js/server');
+const app = express();
 
-        // Return result for the assistant
-        return {
-          content: [{
-            type: 'text',
-            text: `Updated ${args.category} to $${args.amount}`
-          }]
-        };
-      }
-    }
-  ]
+app.use(express.json());
+app.use(express.static('.'));
+
+// Serve the Snappjack SDK from the installed npm package
+app.use('/sdk', express.static('node_modules/@snappjack/sdk-js/dist'));
+
+// Initialize server helper with your API credentials
+const serverHelper = new SnappjackServerHelper({
+  snappId: process.env.SNAPP_ID,
+  snappApiKey: process.env.SNAPP_API_KEY // wak_...
 });
 
-// Connect to enable your UAI
-await snappjack.connect();
+// Unified user session endpoint
+app.post('/api/user/session', async (req, res) => {
+  try {
+    const { existingUserId, forceNew = false } = req.body;
+
+    if (forceNew) {
+      const result = await serverHelper.createUser();
+      return res.json({ ...result, isNew: true });
+    }
+
+    if (existingUserId) {
+      try {
+        await serverHelper.generateEphemeralToken(existingUserId);
+        return res.json({ userId: existingUserId, isNew: false });
+      } catch (error) {
+        // User invalid, create new one
+      }
+    }
+
+    const result = await serverHelper.createUser();
+    res.json({ ...result, isNew: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to manage user session' });
+  }
+});
+
+// Secure token endpoint
+app.post('/api/token', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    const tokenData = await serverHelper.generateEphemeralToken(userId);
+    res.json({ token: tokenData.token });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to generate token' });
+  }
+});
+
+// App configuration endpoint
+app.get('/api/config', (req, res) => {
+  res.json({
+    snappId: process.env.SNAPP_ID,
+    appName: 'Hello World Snapp'
+  });
+});
+
+app.listen(3001);
 ```
 
-## Constructor Configuration
+**Concept Demonstrated**: The secure server architecture handles user lifecycle management, serves the SDK locally, and provides configuration as a single source of truth.
 
-The Snappjack constructor accepts a configuration object with the following properties:
+### Step 2: The Client-Side Snapp
 
-### Required Parameters
+Create an HTML page with a shared textarea and JavaScript that initializes the SDK with collaborative tools.
 
-- **`snappId`** (string): Unique identifier for your application
-- **`userId`** (string): Unique identifier for the current user
-- **`tokenProvider`** (function): Function that returns a Promise resolving to an ephemeral JWT token
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Hello World Snapp</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Hello, World!</h1>
 
-### Optional Parameters
+        <div class="shared-textarea-section">
+            <label for="shared-textarea">Shared Text Area (User & Agent):</label>
+            <textarea id="shared-textarea" placeholder="Type here... AI agents can also read and write to this area."></textarea>
+        </div>
 
-- **`tools`** (array): Array of tool definitions to register immediately
-- **`autoReconnect`** (boolean): Enable automatic reconnection (default: `true`)
-- **`reconnectInterval`** (number): Base reconnection interval in ms (default: `5000`)
-- **`maxReconnectAttempts`** (number): Maximum reconnection attempts (default: `10`)
-- **`logger`** (object): Custom logger with `log`, `warn`, `error` methods
+        <div class="connection-status">
+            <h3>🔗 Connection Status: <span id="status" class="status-indicator disconnected">Disconnected</span></h3>
+        </div>
+
+        <div id="connection-info" class="connection-info">
+            <h3>🤖 Agent Connection Details</h3>
+            <p>Use this configuration to connect your AI assistant:</p>
+            <pre id="mcp-config"></pre>
+            <p><strong>Test prompts:</strong></p>
+            <ul>
+                <li>"Write 'Hello from AI!' in the shared textarea"</li>
+                <li>"What's currently in the shared text area?"</li>
+                <li>"Add your message to whatever is in the textarea"</li>
+            </ul>
+        </div>
+
+        <div class="logs-section">
+            <div class="logs-header">
+                <h3>📝 Logs</h3>
+                <button onclick="clearLogs()" class="clear-logs-btn">Clear Logs</button>
+            </div>
+            <div id="logs" class="logs">
+                <div class="log-entry info">Initializing Hello World Snapp...</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/sdk/snappjack-sdk.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
+```
+
+The JavaScript (script.js) handles the SDK integration:
+
+```javascript
+// Application configuration and user management
+let appConfig = null;
+let userId = null;
+
+// Load configuration from server
+async function loadAppConfig() {
+    const response = await fetch('/api/config');
+    appConfig = await response.json();
+    return appConfig;
+}
+
+// Get or create user session with automatic fallback
+async function getUserSession(forceNew = false) {
+    const existingUserId = forceNew ? null : localStorage.getItem('hello-world-user-id');
+
+    const response = await fetch('/api/user/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ existingUserId, forceNew })
+    });
+
+    const userData = await response.json();
+    userId = userData.userId;
+    localStorage.setItem('hello-world-user-id', userId);
+    return userData;
+}
+
+// Token provider calls your secure backend
+async function getToken() {
+    const response = await fetch('/api/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId })
+    });
+    const { token } = await response.json();
+    return token;
+}
+
+// Initialize the Snapp with collaborative tools
+async function initializeSnappjack() {
+    await loadAppConfig();
+    await getUserSession();
+
+    const snappjack = new Snappjack({
+        snappId: appConfig.snappId,
+        userId: userId,
+        tokenProvider: getToken,
+
+        tools: [{
+            name: 'update_textarea',
+            description: 'Update the shared textarea content. Use this when the user wants to change or add text to the shared text area that both user and agent can see.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    text: {
+                        type: 'string',
+                        description: 'The new text content for the shared textarea',
+                        maxLength: 2000
+                    }
+                },
+                required: ['text']
+            },
+            handler: async (args) => {
+                try {
+                    document.getElementById('shared-textarea').value = args.text;
+                    return {
+                        content: [{ type: 'text', text: 'Update successful.' }],
+                        isError: false
+                    };
+                } catch (error) {
+                    return {
+                        content: [{ type: 'text', text: `Error: ${error.message}` }],
+                        isError: true
+                    };
+                }
+            }
+        }, {
+            name: 'get_textarea',
+            description: 'Get the current content of the shared textarea. Use this to see what the user has typed or what is currently in the shared text area.',
+            inputSchema: { type: 'object', properties: {} },
+            handler: async (args) => {
+                try {
+                    const currentText = document.getElementById('shared-textarea').value;
+                    return {
+                        content: [{ type: 'text', text: currentText || '(textarea is empty)' }],
+                        isError: false
+                    };
+                } catch (error) {
+                    return {
+                        content: [{ type: 'text', text: `Error: ${error.message}` }],
+                        isError: true
+                    };
+                }
+            }
+        }]
+    });
+
+    // Event-driven connection lifecycle
+    snappjack.on('status', (status) => {
+        const statusEl = document.getElementById('status');
+        statusEl.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+        statusEl.className = `status-indicator ${status}`;
+    });
+
+    snappjack.on('connection-info-updated', (connectionData) => {
+        // Build MCP configuration without headers if auth not required
+        const connection = {
+            type: 'streamableHttp',
+            url: connectionData.mcpEndpoint
+        };
+
+        if (connectionData.requireAuthHeader) {
+            connection.headers = {
+                Authorization: `Bearer ${connectionData.userApiKey}`
+            };
+        }
+
+        const config = { "hello-world": connection };
+        document.getElementById('mcp-config').textContent = JSON.stringify(config, null, 2);
+        document.getElementById('connection-info').classList.add('visible');
+    });
+
+    await snappjack.connect();
+}
+
+initializeSnappjack();
+```
+
+**Concepts Demonstrated**:
+- **Collaborative Tools**: The `update_textarea` and `get_textarea` tools enable bidirectional communication between users and agents in a shared workspace
+- **Centralized Configuration**: App config and user management are handled server-side with client automatically fetching configuration
+- **MCP-Compliant Responses**: Tools return proper JSON objects with `content` arrays and `isError` flags for robust error handling
+- **Real-Time Bridge Connection**: DOM manipulation in tool handlers shows how agent actions immediately affect the live user interface
+- **Event-Driven Architecture**: Status listeners and connection info updates demonstrate the connection lifecycle
+- **User Persistence**: LocalStorage maintains user identity across sessions with automatic fallback when user IDs become invalid
+
+### Step 3: Connecting the AI Agent
+
+When your Snapp connects, the SDK automatically displays connection details in the Agent Connection Details section. Your users can copy this MCP configuration to their AI assistant:
+
+```json
+{
+  "hello-world": {
+    "type": "streamableHttp",
+    "url": "https://bridge.snappjack.com/mcp/hello-world-app/user-abc123",
+    "headers": {
+      "Authorization": "Bearer uak_xyz789..."
+    }
+  }
+}
+```
+
+Note: The `headers` field is only included when authentication is enabled. The demo includes an auth toggle button to switch between authenticated and non-authenticated modes for testing.
+
+Users can then give their AI assistant commands like:
+
+> "Write 'Hello from AI!' in the shared textarea"
+> "What's currently in the shared text area?"
+> "Add your message to whatever is in the textarea"
+
+**Final Result**: The shared textarea updates in real-time as the agent writes to it, and the agent can also read what the user has typed, creating a collaborative workspace between human and AI.
+
+**Concept Demonstrated**: The Snappjack Bridge acts as the intermediary, routing agent requests to your application and responses back to the agent, all while maintaining real-time state synchronization.
+
+**Note**: This complete example is available in the `snappjack-demo-nodejs-hello-world/` directory. It demonstrates serving the SDK from the installed npm package at `node_modules/@snappjack/sdk-js/dist` via the `/sdk` route, which is the recommended approach for Node.js applications.
+
+## Core Concepts
+
+This section explains the technical architecture that makes Snapps possible.
+
+### The Components of the Snappjack Ecosystem
+
+There are four key players in every Snappjack integration:
+
+1. **The Snapp (Your Client App)**: Your web application with integrated Snappjack SDK
+2. **Your Secure Backend**: Server-side code that manages authentication and user identity
+3. **The Snappjack Bridge**: Snappjack's service that routes messages between your app and agents
+4. **The AI Agent**: User's AI assistant (Claude, ChatGPT, etc.) that connects via MCP
+
+### The Secure Authentication Flow
+
+Security is managed through a client-server pattern that keeps your credentials safe:
+
+- **Secret API Key**: Your `snappApiKey` (starting with `wak_`) is a secret that must never be exposed client-side. Store it securely in environment variables on your server.
+
+- **Ephemeral Token Pattern**: Your client requests a short-lived JWT token from your secure backend. This token expires in 10 seconds and is used solely to initiate the WebSocket connection to the Snappjack Bridge.
+
+- **User Identity Management**: User accounts are created and managed server-side using the `SnappjackServerHelper.createUser()` method. This ensures each user is isolated and secure.
+
+- **Per-User Isolation**: Each user gets their own API key and isolated workspace, preventing any cross-user data access.
+
+### The Real-Time Bridge Connection
+
+The SDK establishes a persistent, stateful WebSocket connection between your application and the Snappjack Bridge:
+
+- **Persistent Connection**: Unlike REST APIs, this connection remains open, allowing for real-time bidirectional communication.
+
+- **Same Instance Interaction**: Agents interact with the exact same application instance that users are viewing, enabling true collaborative experiences.
+
+- **Connection Lifecycle**: Applications move through connection states:
+  - `disconnected`: Not connected to Snappjack
+  - `connected`: Connected to bridge, waiting for agent
+  - `bridged`: Agent connected and ready to interact
+
+- **Event-Driven Architecture**: All state changes are communicated through events rather than polling, ensuring efficient real-time updates.
+
+### The Tool as an API Contract
+
+Tools define the interface between your application and AI agents:
+
+- **Structured Definition**: Each tool has a `name`, `description`, `inputSchema`, and `handler` - creating a complete function signature that AI can understand and use.
+
+- **Semantic Context**: The `description` field provides the contextual information that Large Language Models need to reason about when and how to use the tool.
+
+- **Type Safety**: The `inputSchema` uses JSON Schema to enforce strict data contracts, ensuring agents provide properly formatted inputs.
+
+- **Execution Handler**: The `handler` function contains your business logic and returns structured responses that both agents and your application can process.
+
+- **MCP Compliance**: Tools follow the Model Context Protocol specification, making them compatible with any MCP-enabled AI agent.
+
+## Client-Side SDK Usage
+
+### Initialization
+
+Create a new Snappjack instance with your configuration:
 
 ```typescript
 const snappjack = new Snappjack({
-  // Required
-  snappId: 'budget-tracker',
-  userId: 'user-123',
-  tokenProvider: () => getEphemeralToken('budget-tracker', 'user-123'),
+  // Required parameters
+  snappId: 'your-app-id',
+  userId: 'unique-user-id',
+  tokenProvider: () => getEphemeralToken(),
 
-  // Optional
+  // Optional parameters
   tools: [/* tool definitions */],
   autoReconnect: true,
   reconnectInterval: 5000,
@@ -169,750 +434,450 @@ const snappjack = new Snappjack({
 });
 ```
 
-## Defining Tools
+### Defining Tools
 
-### Tool Structure
-
-Tools follow the [MCP Tool Schema](https://modelcontextprotocol.io/docs/concepts/tools#tool-definition):
+Tools expose your app's functionality to AI agents:
 
 ```typescript
-{
-  name: 'tool_name',              // Unique identifier
-  description: 'What this does',  // Help AI understand usage
-  inputSchema: {                  // JSON Schema for parameters
+const tool = {
+  name: 'update_budget',
+  description: 'Update budget category amounts when user wants to adjust spending limits',
+  inputSchema: {
     type: 'object',
     properties: {
-      // Define expected parameters
+      category: {
+        type: 'string',
+        enum: ['food', 'transport', 'entertainment']
+      },
+      amount: {
+        type: 'number',
+        minimum: 0
+      }
     },
-    required: []                  // Required parameters
+    required: ['category', 'amount']
   },
-  handler: async (args) => {      // Your implementation
-    // Process the request
+  handler: async (args) => {
+    // Your business logic
+    await updateBudgetCategory(args.category, args.amount);
+
     // Return MCP-compliant response
-  }
-}
-```
-
-### Input Validation
-
-Input schemas use [JSON Schema](https://json-schema.org/) format. Snappjack validates all inputs before calling your handler:
-
-```typescript
-inputSchema: {
-  type: 'object',
-  properties: {
-    amount: {
-      type: 'number',
-      minimum: 0,
-      description: 'Amount in dollars'
-    },
-    category: {
-      type: 'string',
-      enum: ['food', 'transport', 'entertainment'],
-      description: 'Budget category'
-    },
-    note: {
-      type: 'string',
-      maxLength: 500,
-      description: 'Optional note'
-    }
-  },
-  required: ['amount', 'category']
-}
-```
-
-### Response Format
-
-Handlers must return responses following the [MCP Response Schema](https://modelcontextprotocol.io/docs/concepts/tool-responses):
-
-```typescript
-// Simple text response
-return {
-  content: [{
-    type: 'text',
-    text: 'Operation completed successfully'
-  }]
-};
-
-// Response with structured data
-return {
-  content: [{
-    type: 'text',
-    text: 'Budget updated'
-  }],
-  data: {
-    newBalance: 1500.00,
-    categories: ['food', 'transport']
+    return {
+      content: [{
+        type: 'text',
+        text: `Updated ${args.category} budget to $${args.amount}`
+      }]
+    };
   }
 };
+
+// Register the tool
+snappjack.registerTool(tool);
 ```
 
-## Connection Management
+### Connection Management
 
-### Status States
-
-Your app moves through three connection states:
-
-1. **`disconnected`** - Not connected to Snappjack
-2. **`connected`** - Connected, waiting for user's assistant
-3. **`bridged`** - Assistant connected and ready
+Connect and manage your Snapp's connection:
 
 ```typescript
-snappjack.on('status', (status) => {
-  // status: 'disconnected' | 'connected' | 'bridged'
-
-  switch(status) {
-    case 'disconnected':
-      showOfflineIndicator();
-      break;
-    case 'connected':
-      showWaitingForAgent();
-      break;
-    case 'bridged':
-      showAgentActive();
-      break;
-  }
-});
-```
-
-### Events Reference
-
-The SDK uses a pure event-driven architecture. All state changes and data are communicated through events:
-
-#### `status`
-Emitted when connection status changes.
-
-```typescript
-snappjack.on('status', (status) => {
-  // status: 'disconnected' | 'connected' | 'bridged'
-});
-```
-
-#### `connection-info-updated`
-Emitted when connection information changes, including user API key generation, authentication requirement updates, and other connection state changes. **This is the primary event for connection data updates.**
-
-```typescript
-snappjack.on('connection-info-updated', (connectionData) => {
-  // connectionData.userApiKey: string - The user API key for MCP connections
-  // connectionData.snappId: string - Your app ID
-  // connectionData.userId: string - The user ID
-  // connectionData.mcpEndpoint: string - Full MCP endpoint URL for agent connections
-  // connectionData.requireAuthHeader: boolean - Whether Bearer token authentication is required (default: true)
-});
-```
-
-#### `user-api-key-generated`
-*Legacy event name - maintained for backward compatibility.* Use `connection-info-updated` for new implementations.
-
-```typescript
-snappjack.on('user-api-key-generated', (connectionData) => {
-  // Same structure as connection-info-updated event
-});
-```
-
-#### `agent-connected`
-Emitted when an AI assistant connects.
-
-```typescript
-snappjack.on('agent-connected', (data) => {
-  // data.agentSessionId: string - Unique session ID for this agent connection
-});
-```
-
-#### `agent-disconnected`
-Emitted when an AI assistant disconnects.
-
-```typescript
-snappjack.on('agent-disconnected', (data) => {
-  // data.agentSessionId: string - Session ID of the disconnected agent
-});
-```
-
-#### `error`
-Emitted when an error occurs.
-
-```typescript
-snappjack.on('error', (error) => {
-  // error: Error object or string
-});
-```
-
-#### `message`
-Emitted for any unhandled messages (for debugging or custom handling).
-
-```typescript
-snappjack.on('message', (message) => {
-  // message: Raw message object
-});
-```
-
-## Enabling User Connections
-
-When users want to connect their AI assistant, listen for the connection event:
-
-```typescript
-// Listen for connection configuration
-snappjack.on('connection-info-updated', (connectionData) => {
-  // Build MCP configuration from the event data
-  const config = {
-    connections: [{
-      name: `${connectionData.snappId} (${connectionData.userId})`,
-      type: 'streamableHttp',
-      url: connectionData.mcpEndpoint,
-      headers: connectionData.requireAuthHeader ? {
-        Authorization: `Bearer ${connectionData.userApiKey}`
-      } : {}
-    }]
-  };
-
-  // Display to user (they add this to their assistant)
-  showConnectionInstructions(config);
-});
-```
-
-### Connection Data Structure
-
-The `connection-info-updated` event provides all data needed for MCP connections:
-
-```javascript
-{
-  userApiKey: 'uak_abc123def456',     // User API key for agent authentication
-  snappId: 'budget-tracker',             // Your app ID
-  userId: 'user-123',                  // Current user ID
-  mcpEndpoint: 'https://bridge.snappjack.com/mcp/budget-tracker/user-123', // Full MCP endpoint
-  requireAuthHeader: true             // Whether Bearer token is required (default: true)
-}
-```
-
-This generates an MCP configuration like:
-```json
-{
-  "connections": [{
-    "name": "Budget Tracker (john@example.com)",
-    "type": "streamableHttp",
-    "url": "https://bridge.snappjack.com/mcp/budget-tracker/user-123",
-    "headers": {
-      "Authorization": "Bearer uak_..."
-    }
-  }]
-}
-```
-
-## Available Methods
-
-The SDK provides these public methods:
-
-### Connection Methods
-
-#### `connect()`
-Establishes connection to Snappjack bridge.
-
-```typescript
+// Connect to Snappjack Bridge
 await snappjack.connect();
-// Returns: Promise<void>
-// Throws: Error if connection fails
-```
 
-#### `disconnect()`
-Closes connection to Snappjack bridge.
-
-```typescript
+// Disconnect when needed
 await snappjack.disconnect();
-// Returns: Promise<void>
+
+// Check current status
+console.log(snappjack.status); // 'disconnected' | 'connected' | 'bridged'
 ```
 
-### Tool Management
+### Handling Events
 
-#### `registerTool(tool)`
-Registers a new tool with your application.
+The SDK uses an event-driven architecture for all communication:
 
 ```typescript
-snappjack.registerTool({
-  name: 'my_tool',
-  description: 'Does something useful',
-  inputSchema: { /* JSON Schema */ },
-  handler: async (args) => { /* implementation */ }
+// Connection status changes
+snappjack.on('status', (status) => {
+  console.log('Connection status:', status);
 });
-// Returns: void
+
+// Connection information for agent setup
+snappjack.on('connection-info-updated', (connectionData) => {
+  // connectionData contains MCP endpoint URL, user API key, etc.
+  showAgentConnectionInstructions(connectionData);
+});
+
+// Agent connection events
+snappjack.on('agent-connected', (data) => {
+  console.log('Agent connected:', data.agentSessionId);
+});
+
+snappjack.on('agent-disconnected', (data) => {
+  console.log('Agent disconnected:', data.agentSessionId);
+});
+
+// Error handling
+snappjack.on('error', (error) => {
+  console.error('Snappjack error:', error);
+});
 ```
 
-#### `getTools()`
-Returns array of currently registered tool definitions (without handlers).
+### Managing Tools
+
+Add, remove, and inspect tools dynamically:
 
 ```typescript
+// Register a new tool
+snappjack.registerTool(myTool);
+
+// Get all registered tools (without handlers)
 const tools = snappjack.getTools();
-// Returns: Array<{name, description, inputSchema}>
+
+// Tools are automatically available to connected agents
 ```
 
-### Utility Methods
+## Server-Side SDK Usage (SnappjackServerHelper)
 
-#### `on(event, listener)`
-Standard event listener method.
+The server-side SDK handles user management and authentication.
 
-```typescript
-const handler = (status) => console.log(status);
-snappjack.on('status', handler);
-// Returns: Snappjack instance (chainable)
-```
-
-## Server-Side SDK Methods
-
-The SDK provides server-side functionality for managing users and generating authentication tokens. Use these methods on your server to support client-side authentication:
-
-### Installation and Setup
+### Setup
 
 ```typescript
 import { SnappjackServerHelper } from '@snappjack/sdk-js/server';
 
 const serverHelper = new SnappjackServerHelper({
   snappId: 'your-app-id',
-  snappApiKey: 'wak_your_api_key' // Your Snapp API Key starting with 'wak_'
+  snappApiKey: process.env.SNAPP_API_KEY // wak_your_secret_key
 });
 ```
 
 ### User Management
 
-#### `createUser()`
-Creates a new user with an auto-generated UUID.
+#### Create User with Auto-Generated ID
 
 ```typescript
 const result = await serverHelper.createUser();
-// Returns: { userId: string, userApiKey: string, snappId: string, mcpEndpoint: string, createdAt: string }
+// Returns: { userId, userApiKey, snappId, mcpEndpoint, createdAt }
 ```
 
-#### `registerUser(userId)`
-Registers a user with a client-provided userId.
+#### Register User with Custom ID
 
 ```typescript
-const result = await serverHelper.registerUser('user-123');
-// Returns: { userId: string, userApiKey: string, snappId: string, mcpEndpoint: string, createdAt: string }
+const result = await serverHelper.registerUser('custom-user-123');
+// Returns: { userId, userApiKey, snappId, mcpEndpoint, createdAt }
 ```
 
-#### `generateEphemeralToken(userId)`
-Generates a short-lived JWT token for WebSocket authentication (expires in 10 seconds).
+#### Generate Ephemeral Tokens
 
 ```typescript
 const tokenData = await serverHelper.generateEphemeralToken('user-123');
-// Returns: { token: string, expiresAt: number, snappId: string, userId: string }
-```
+// Returns: { token, expiresAt, snappId, userId }
 
-### Complete Server Setup Example
-
-```typescript
-// Example Express.js API endpoint
-app.post('/api/snappjack/token', async (req, res) => {
-  try {
-    const { snappId, userId } = req.body;
-
-    const serverHelper = new SnappjackServerHelper({
-      snappId,
-      snappApiKey: process.env.SNAPP_API_KEY! // wak_...
-    });
-
-    const tokenData = await serverHelper.generateEphemeralToken(userId);
-    res.json({ token: tokenData.token });
-  } catch (error) {
-    console.error('Token generation failed:', error);
-    res.status(500).json({ error: 'Failed to generate token' });
-  }
+// Use in your API endpoint:
+app.post('/api/token', async (req, res) => {
+  const { userId } = req.body;
+  const tokenData = await serverHelper.generateEphemeralToken(userId);
+  res.json({ token: tokenData.token });
 });
 ```
 
 ### Authentication Requirement Management
 
-#### `updateAuthRequirement(userId, requireAuthHeader)`
-Updates the authentication requirement for a specific user.
+Control whether agents need Bearer tokens to connect:
 
 ```typescript
-// Disable auth requirement for a user
-const result = await serverHelper.updateAuthRequirement('user-123', false);
-// Returns: { snappId, userId, requireAuthHeader, updatedAt }
+// Disable authentication requirement (e.g., for development)
+await serverHelper.updateAuthRequirement('user-123', false);
 
-// Re-enable auth requirement
-const result = await serverHelper.updateAuthRequirement('user-123', true);
+// Re-enable authentication requirement
+await serverHelper.updateAuthRequirement('user-123', true);
 ```
 
-### Use Cases for Auth Requirement Management
+Use cases for disabling authentication:
+- Development and testing environments
+- Demo applications
+- Power user features for faster connections
 
-**Development and Testing:**
-```javascript
-// Disable auth for easier testing
-await serverHelper.updateAuthRequirement(testUserId, false);
-// Now agents can connect without Bearer tokens
-```
+## Advanced Guide & Best Practices
 
-**Power User Features:**
-```javascript
-// Allow advanced users to bypass auth for faster connections
-if (user.isPremium && user.settings.fastAgentAccess) {
-  await serverHelper.updateAuthRequirement(user.id, false);
-}
-```
+### Real-Time State Synchronization
 
-**Temporary Access:**
-```javascript
-// Temporarily disable auth for a demo or presentation
-await serverHelper.updateAuthRequirement(demoUserId, false);
-// Remember to re-enable afterward
-setTimeout(async () => {
-  await serverHelper.updateAuthRequirement(demoUserId, true);
-}, 3600000); // 1 hour
-```
-
-## Best Practices
-
-### Designing Effective Tools
-
-**Think in User Actions, Not Database Operations**
-
-```javascript
-// ❌ Poor: Exposes implementation details
-{
-  name: 'update_category_record',
-  description: 'Updates the category table row'
-}
-
-// ✅ Good: Describes user intent
-{
-  name: 'adjust_budget',
-  description: 'Adjust spending limit for a budget category'
-}
-```
-
-**Make Descriptions Assistant-Friendly**
-
-```javascript
-// ❌ Poor: Vague description
-description: 'Process budget'
-
-// ✅ Good: Clear context and usage
-description: 'Update budget category amounts. Use when user wants to change spending limits, reallocate funds between categories, or set new budget targets.'
-```
-
-**Handle Partial Information Gracefully**
-
-```javascript
-handler: async (args) => {
-  // Check if we need more context
-  if (!args.category && args.amount > 1000) {
-    throw new Error('Please specify which category to update for amounts over $1000');
-  }
-  
-  // Provide intelligent defaults
-  const category = args.category || await guessCategory(args.description);
-  
-  // Proceed with operation
-  await updateBudget(category, args.amount);
-}
-```
-
-### Security Considerations
-
-**Validate Permissions in Every Handler**
-
-```javascript
-handler: async (args) => {
-  // Always verify the user can perform this action
-  const user = await getCurrentUser();
-  if (!user.canEditBudget(args.budgetId)) {
-    throw new Error('You don\'t have permission to edit this budget');
-  }
-  
-  // Proceed with operation
-  await performUpdate(args);
-}
-```
-
-**Consider Authentication Requirements Carefully**
-
-```javascript
-// ❌ Poor: Disabling auth without consideration
-await serverHelper.updateAuthRequirement(userId, false);
-
-// ✅ Good: Consider user context and security implications
-if (user.role === 'developer' && process.env.NODE_ENV === 'development') {
-  await serverHelper.updateAuthRequirement(userId, false);
-  console.log('Auth disabled for developer in development mode');
-} else if (user.settings.disableAuth && user.hasAcceptedSecurityWarning) {
-  await serverHelper.updateAuthRequirement(userId, false);
-  auditLog.record('AUTH_DISABLED', { userId, reason: 'user_preference' });
-}
-```
-
-**Never Expose Sensitive Data**
-
-```javascript
-// ❌ Poor: Returns internal IDs and sensitive data
-return {
-  content: [{
-    type: 'text',
-    text: `Updated user ${user.internalId} with SSN ${user.ssn}`
-  }]
-};
-
-// ✅ Good: Returns only what the user should see
-return {
-  content: [{
-    type: 'text',
-    text: `Updated your profile successfully`
-  }]
-};
-```
-
-### Performance Optimization
-
-**Keep Handlers Fast**
-
-```javascript
-handler: async (args) => {
-  // For long operations, return quickly with status
-  const jobId = await startBudgetRecalculation(args);
-  
-  return {
-    content: [{
-      type: 'text',
-      text: 'Started recalculating your budget. This may take a moment...'
-    }],
-    data: { jobId }
-  };
-}
-```
-
-**Batch Operations When Possible**
-
-```javascript
-{
-  name: 'update_multiple_categories',
-  description: 'Update several budget categories at once',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      updates: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            category: { type: 'string' },
-            amount: { type: 'number' }
-          }
-        }
-      }
-    }
-  },
-  handler: async (args) => {
-    // Process all updates in a single transaction
-    const results = await batchUpdateCategories(args.updates);
-    return {
-      content: [{
-        type: 'text',
-        text: `Updated ${results.length} categories`
-      }]
-    };
-  }
-}
-```
-
-## Complete Example: Budget Tracker UAI
-
-Here's how a budget tracking app transforms into a UAI:
+Ensure both human users and AI agents operate on the same application state:
 
 ```typescript
-// Client-side application code
-class BudgetApp {
-  private snappjack: Snappjack;
+// Use a centralized state store
+class AppState {
+  private state = { budget: 1000, categories: {} };
+  private listeners = [];
 
-  constructor(userId: string) {
-    // Initialize Snappjack when your app loads
-    this.snappjack = new Snappjack({
-      snappId: 'budget-tracker',
-      userId: userId,
-      tokenProvider: () => this.getEphemeralToken(userId),
-      tools: [
-        {
-          name: 'analyze_spending',
-          description: 'Analyze spending patterns and get insights. Use when user asks about their spending habits, trends, or wants recommendations.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              timeframe: {
-                type: 'string',
-                enum: ['week', 'month', 'quarter', 'year'],
-                description: 'Time period to analyze'
-              },
-              category: {
-                type: 'string',
-                description: 'Optional: specific category to analyze'
-              }
-            },
-            required: ['timeframe']
-          },
-          handler: async (args) => {
-            const analysis = await this.analyzeSpending(args.timeframe, args.category);
+  updateBudget(category, amount) {
+    this.state.categories[category] = amount;
 
-            return {
-              content: [{
-                type: 'text',
-                text: analysis.summary
-              }],
-              data: analysis.details
-            };
-          }
-        },
-
-        {
-          name: 'adjust_budget',
-          description: 'Adjust budget amounts for categories. Use when user wants to change spending limits, reallocate funds, or update their budget.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              adjustments: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  properties: {
-                    category: { type: 'string' },
-                    amount: { type: 'number' },
-                    operation: {
-                      type: 'string',
-                      enum: ['set', 'increase', 'decrease']
-                    }
-                  },
-                  required: ['category', 'amount', 'operation']
-                }
-              },
-              reason: {
-                type: 'string',
-                description: 'Why the adjustment is being made'
-              }
-            },
-            required: ['adjustments']
-          },
-          handler: async (args) => {
-            // Validate user permissions
-            if (!this.canEditBudget()) {
-              throw new Error('Budget is locked for editing');
-            }
-
-            // Process adjustments
-            const results = [];
-            for (const adj of args.adjustments) {
-              const newAmount = await this.adjustBudgetCategory(
-                adj.category,
-                adj.amount,
-                adj.operation
-              );
-              results.push(`${adj.category}: $${newAmount}`);
-            }
-
-            // Log the reason if provided
-            if (args.reason) {
-              await this.logBudgetChange(args.reason);
-            }
-
-            return {
-              content: [{
-                type: 'text',
-                text: `Budget updated:\n${results.join('\n')}`
-              }]
-            };
-          }
-        }
-      ]
-    });
-
-    // Setup event listeners
-    this.setupEventListeners();
+    // Notify all listeners (UI components, tool handlers)
+    this.listeners.forEach(listener => listener(this.state));
   }
 
-  private async getEphemeralToken(userId: string): Promise<string> {
-    const response = await fetch('/api/snappjack/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ snappId: 'budget-tracker', userId })
-    });
-    const { token } = await response.json();
-    return token;
+  subscribe(callback) {
+    this.listeners.push(callback);
   }
-
-  private setupEventListeners(): void {
-    // Update UI based on connection status
-    this.snappjack.on('status', (status) => {
-      this.updateConnectionIndicator(status);
-    });
-
-    // Show connection instructions when ready
-    this.snappjack.on('connection-info-updated', (connectionData) => {
-      // Build MCP configuration from the event data
-      const config = {
-        connections: [{
-          name: `${connectionData.snappId} (${connectionData.userId})`,
-          type: 'streamableHttp',
-          url: connectionData.mcpEndpoint,
-          headers: connectionData.requireAuthHeader ? {
-            Authorization: `Bearer ${connectionData.userApiKey}`
-          } : {}
-        }]
-      };
-
-      this.showAgentConnectionModal(config);
-    });
-  }
-
-  public async start(): Promise<void> {
-    await this.snappjack.connect();
-  }
-
-  // Your existing business logic methods
-  private async analyzeSpending(timeframe: string, category?: string) { /* ... */ }
-  private async adjustBudgetCategory(category: string, amount: number, operation: string) { /* ... */ }
-  private canEditBudget(): boolean { /* ... */ }
-  private async logBudgetChange(reason: string) { /* ... */ }
-  private updateConnectionIndicator(status: string) { /* ... */ }
-  private showAgentConnectionModal(config: any) { /* ... */ }
 }
 
-// Usage
-const app = new BudgetApp('user-123');
-await app.start();
-```
+const appState = new AppState();
 
-### Example User Interactions
+// Tool handler updates shared state
+handler: async (args) => {
+  appState.updateBudget(args.category, args.amount);
+  return { content: [{ type: 'text', text: 'Budget updated' }] };
+}
 
-With this UAI, users can now say things like:
-
-- *"How much did I spend on coffee this month?"*
-- *"Move $200 from entertainment to savings"*
-- *"I'm planning a vacation. Analyze my discretionary spending and suggest where I can cut back"*
-- *"Set up a new budget category for home gym equipment with $150/month"*
-
-The assistant will use your tools to perform these actions, and users will see the results immediately in your app's UI.
-
-## Important Notes
-
-### Cross-Domain Support
-The SDK automatically detects the server URL from where it's loaded, enabling seamless cross-domain deployments. When loaded from `https://bridge.snappjack.com/sdk/snappjack.js`, all API calls and WebSocket connections will automatically use the bridge.snappjack.com server.
-
-### Event-Driven Architecture
-The SDK uses a pure event-driven architecture. Do not poll methods for state changes - instead, listen to events:
-
-- ✅ **Good**: `snappjack.on('status', handler)` 
-- ❌ **Avoid**: Polling or checking connection status repeatedly
-
-### Error Handling
-All errors are emitted as `error` events. Always listen for these:
-
-```typescript
-snappjack.on('error', (error) => {
-  console.error('Snappjack error:', error);
-  // Handle error appropriately
+// UI components react to state changes
+appState.subscribe((newState) => {
+  updateBudgetUI(newState);
 });
 ```
 
-### Tool Handler Best Practices
-- Validate all inputs even though SDK validates schema
-- Keep handlers fast (< 2 seconds)
-- Return meaningful error messages
-- Use structured responses with proper MCP format
+### Framework-Specific Integration Patterns
+
+#### React Integration
+
+```typescript
+// Context Provider pattern
+const SnappjackContext = createContext();
+
+function SnappjackProvider({ children }) {
+  const [snappjack] = useState(() => new Snappjack({
+    snappId: 'my-app',
+    userId: getCurrentUserId(),
+    tokenProvider: getToken,
+    tools: createTools()
+  }));
+
+  useEffect(() => {
+    snappjack.connect();
+    return () => snappjack.disconnect(); // Cleanup on unmount
+  }, [snappjack]);
+
+  return (
+    <SnappjackContext.Provider value={snappjack}>
+      {children}
+    </SnappjackContext.Provider>
+  );
+}
+
+// Hook for accessing Snappjack instance
+function useSnappjack() {
+  return useContext(SnappjackContext);
+}
+```
+
+#### Vue.js Integration
+
+```typescript
+// Vue plugin
+const SnappjackPlugin = {
+  install(app, options) {
+    const snappjack = new Snappjack(options);
+
+    app.config.globalProperties.$snappjack = snappjack;
+    app.provide('snappjack', snappjack);
+
+    // Connect on app mount
+    snappjack.connect();
+
+    // Cleanup on app unmount
+    app._context.app._container.addEventListener('beforeunmount', () => {
+      snappjack.disconnect();
+    });
+  }
+};
+
+// Usage
+app.use(SnappjackPlugin, {
+  snappId: 'my-vue-app',
+  userId: 'user-123',
+  tokenProvider: getToken,
+  tools: myTools
+});
+```
+
+### Security Best Practices
+
+#### Permission Validation
+
+Always validate user permissions in tool handlers:
+
+```typescript
+handler: async (args) => {
+  // Get current user context
+  const user = await getCurrentUser();
+
+  // Validate permissions before executing
+  if (!user.canEditBudget(args.budgetId)) {
+    throw new Error('You do not have permission to edit this budget');
+  }
+
+  // Validate data ownership
+  const budget = await getBudget(args.budgetId);
+  if (budget.userId !== user.id) {
+    throw new Error('Budget not found');
+  }
+
+  // Execute the operation
+  await updateBudget(args);
+
+  return { content: [{ type: 'text', text: 'Budget updated successfully' }] };
+}
+```
+
+#### Input Sanitization
+
+Sanitize inputs even with schema validation:
+
+```typescript
+handler: async (args) => {
+  // Schema validation happens automatically, but add extra sanitization
+  const sanitizedText = args.message
+    .trim()
+    .substring(0, 500) // Limit length
+    .replace(/<script>/gi, ''); // Remove dangerous content
+
+  await updateMessage(sanitizedText);
+}
+```
+
+#### Audit Trails
+
+Log agent actions for security and debugging:
+
+```typescript
+handler: async (args) => {
+  // Log the action
+  await auditLog.record({
+    userId: getCurrentUserId(),
+    action: 'budget_update',
+    parameters: args,
+    timestamp: new Date(),
+    source: 'agent'
+  });
+
+  // Execute the operation
+  const result = await updateBudget(args);
+
+  // Log the result
+  await auditLog.record({
+    userId: getCurrentUserId(),
+    action: 'budget_update_complete',
+    result: result,
+    timestamp: new Date()
+  });
+
+  return result;
+}
+```
+
+### Implementation Checklist
+
+Before deploying your Snapp, ensure you have:
+
+#### Server Setup
+- [ ] Created secure API endpoints for user management and token generation
+- [ ] Stored `SNAPP_API_KEY` securely in environment variables
+- [ ] Implemented proper error handling for token generation
+- [ ] Added rate limiting to prevent abuse
+
+#### Client Integration
+- [ ] Initialized SDK with proper configuration and event listeners
+- [ ] Implemented token provider that calls your secure backend
+- [ ] Added connection status UI for user feedback
+- [ ] Handled connection errors and reconnection gracefully
+
+#### Tool Development
+- [ ] Defined tools that expose your app's core functionality
+- [ ] Written clear, AI-friendly descriptions for each tool
+- [ ] Implemented proper JSON Schema validation
+- [ ] Added permission validation in all tool handlers
+
+#### State Management
+- [ ] Ensured shared state between human and agent interactions
+- [ ] Implemented immediate UI updates for agent actions
+- [ ] Added proper cleanup on component unmount
+- [ ] Tested real-time synchronization thoroughly
+
+#### Security & Validation
+- [ ] Added authentication and permission checks
+- [ ] Implemented input sanitization beyond schema validation
+- [ ] Added audit trails for agent actions
+- [ ] Tested with malicious inputs
+
+#### User Experience
+- [ ] Provided clear instructions for connecting AI agents
+- [ ] Added connection status indicators
+- [ ] Implemented error handling with user-friendly messages
+- [ ] Tested the complete user-to-agent workflow
+
+## API Reference
+
+### Snappjack (Client)
+
+#### Constructor
+```typescript
+new Snappjack(config: {
+  snappId: string;
+  userId: string;
+  tokenProvider: () => Promise<string>;
+  tools?: Tool[];
+  autoReconnect?: boolean;
+  reconnectInterval?: number;
+  maxReconnectAttempts?: number;
+  logger?: Logger;
+})
+```
+
+#### Methods
+- `connect(): Promise<void>` - Establish connection to Snappjack Bridge
+- `disconnect(): Promise<void>` - Close connection to Snappjack Bridge
+- `registerTool(tool: Tool): void` - Register a new tool
+- `getTools(): ToolDefinition[]` - Get registered tool definitions
+- `on(event: string, listener: Function): Snappjack` - Add event listener
+
+#### Events
+- `status` - Connection status changed (`disconnected` | `connected` | `bridged`)
+- `connection-info-updated` - Connection information available
+- `agent-connected` - AI agent connected
+- `agent-disconnected` - AI agent disconnected
+- `error` - Error occurred
+
+### SnappjackServerHelper
+
+#### Constructor
+```typescript
+new SnappjackServerHelper(config: {
+  snappId: string;
+  snappApiKey: string;
+})
+```
+
+#### Methods
+- `createUser(): Promise<UserResult>` - Create user with auto-generated ID
+- `registerUser(userId: string): Promise<UserResult>` - Register user with custom ID
+- `generateEphemeralToken(userId: string): Promise<TokenResult>` - Generate auth token
+- `updateAuthRequirement(userId: string, require: boolean): Promise<AuthUpdateResult>` - Update auth requirement
+
+#### Response Types
+```typescript
+interface UserResult {
+  userId: string;
+  userApiKey: string;
+  snappId: string;
+  mcpEndpoint: string;
+  createdAt: string;
+}
+
+interface TokenResult {
+  token: string;
+  expiresAt: number;
+  snappId: string;
+  userId: string;
+}
+```
 
 ## Resources
 
