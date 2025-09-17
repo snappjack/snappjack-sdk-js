@@ -95,16 +95,8 @@ describe('SnappjackClient', () => {
   });
 
   afterEach(() => {
-    // Clean up environment variables
-    delete process.env.NEXT_PUBLIC_SNAPPJACK_SERVER_URL;
+    // Clean up any test state
   });
-
-  // Mock environment setup helpers
-  const setEnvironment = (serverUrl?: string) => {
-    if (serverUrl) {
-      process.env.NEXT_PUBLIC_SNAPPJACK_SERVER_URL = serverUrl;
-    }
-  };
 
   const createMockToolCallMessage = (toolName: string = 'test-tool', args: any = { message: 'test' }): ToolCallMessage => ({
     jsonrpc: '2.0',
@@ -151,20 +143,18 @@ describe('SnappjackClient', () => {
       
       expect(ConnectionManager).toHaveBeenCalledWith(
         expect.objectContaining({
-          serverUrl: 'wss://bridge.snappjack.com'
+          serverUrl: 'ws://localhost:3000'
         }),
         expect.any(Object)
       );
     });
 
-    it('should use environment variable for server URL', () => {
-      setEnvironment('https://custom-server.com');
-      
+    it('should use compile-time configured server URL', () => {
       const client = new Snappjack(validConfig);
-      
+
       expect(ConnectionManager).toHaveBeenCalledWith(
         expect.objectContaining({
-          serverUrl: 'wss://custom-server.com'
+          serverUrl: 'ws://localhost:3000' // Server URL is now compile-time configured
         }),
         expect.any(Object)
       );
@@ -642,7 +632,8 @@ describe('SnappjackClient', () => {
           userApiKey: 'uak_test12345',
           snappId: 'test-snapp',
           userId: 'test-user',
-          mcpEndpoint: 'https://bridge.snappjack.com/mcp/test-snapp/test-user'
+          mcpEndpoint: 'http://localhost:3000/mcp/test-snapp/test-user',
+          requireAuthHeader: true
         });
       });
 
@@ -681,7 +672,8 @@ describe('SnappjackClient', () => {
           userApiKey: 'uak_test12345',
           snappId: 'test-snapp',
           userId: 'test-user',
-          mcpEndpoint: 'https://secure-server.com/mcp/test-snapp/test-user'
+          mcpEndpoint: 'https://secure-server.com/mcp/test-snapp/test-user',
+          requireAuthHeader: true
         });
       });
     });

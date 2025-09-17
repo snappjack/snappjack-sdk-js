@@ -13,12 +13,13 @@ export interface SnappjackConfig {
   snappId: string;
   userId: string;
   tokenProvider: () => Promise<string>;  // Function to get fresh JWT tokens
-  
+
   tools?: Tool[];
   autoReconnect?: boolean;
   reconnectInterval?: number;
   maxReconnectAttempts?: number;
   logger?: Logger;
+  requireAuthHeader?: boolean;  // Default auth requirement for MCP connections
 }
 
 export interface Logger {
@@ -195,6 +196,11 @@ export interface ForceDisconnectAgentMessage {
   type: 'force-disconnect-agent';
 }
 
+export interface UpdateAuthRequirementMessage {
+  type: 'update-auth-requirement';
+  requireAuthHeader: boolean;
+}
+
 export interface AgentMessage {
   type: 'agent-connected' | 'agent-disconnected';
   agentSessionId: string;
@@ -207,7 +213,7 @@ export interface ConnectionInfoMessage {
 }
 
 // Union type for all WebSocket messages
-export type WebSocketMessage = JsonRpcResponse | ToolRegistrationMessage | ForceDisconnectAgentMessage;
+export type WebSocketMessage = JsonRpcResponse | ToolRegistrationMessage | ForceDisconnectAgentMessage | UpdateAuthRequirementMessage;
 
 // Union type for all incoming messages
 export type IncomingMessage = ToolCallMessage | AgentMessage | ConnectionInfoMessage | { type: string; [key: string]: unknown };

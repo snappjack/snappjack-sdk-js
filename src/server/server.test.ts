@@ -54,21 +54,11 @@ describe('SnappjackServerHelper', () => {
       }).toThrow('Invalid snappApiKey format. Expected: wak_[16 hex chars]');
     });
 
-    it('should use environment variable for server URL when available', () => {
-      const originalEnv = process.env.NEXT_PUBLIC_SNAPPJACK_SERVER_URL;
-      process.env.NEXT_PUBLIC_SNAPPJACK_SERVER_URL = 'https://custom.snappjack.com';
-      
+    it('should use compile-time configured server URL', () => {
       const helper = new SnappjackServerHelper(validConfig);
-      
-      // Access private config to verify URL was set correctly
-      expect(helper['config'].snappjackServerUrl).toBe('https://custom.snappjack.com');
-      
-      // Restore original env
-      if (originalEnv !== undefined) {
-        process.env.NEXT_PUBLIC_SNAPPJACK_SERVER_URL = originalEnv;
-      } else {
-        delete process.env.NEXT_PUBLIC_SNAPPJACK_SERVER_URL;
-      }
+
+      // Access private config to verify URL was set correctly (now uses compile-time constant)
+      expect(helper['config'].snappjackServerUrl).toBe('http://localhost:3000'); // Test environment uses localhost
     });
   });
 
@@ -90,7 +80,7 @@ describe('SnappjackServerHelper', () => {
       const result = await serverHelper.createUser();
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'https://bridge.snappjack.com/api/snapp/test-snapp/users',
+        'http://localhost:3000/api/snapp/test-snapp/users',
         {
           method: 'POST',
           headers: {
@@ -181,7 +171,7 @@ describe('SnappjackServerHelper', () => {
       const result = await serverHelper.generateEphemeralToken(userId);
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'https://bridge.snappjack.com/api/snapp/test-snapp/ephemeral-token',
+        'http://localhost:3000/api/snapp/test-snapp/ephemeral-token',
         {
           method: 'POST',
           headers: {
@@ -236,7 +226,7 @@ describe('SnappjackServerHelper', () => {
       const result = await serverHelper.testConnection();
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'https://bridge.snappjack.com/health',
+        'http://localhost:3000/health',
         {
           method: 'GET',
           headers: {

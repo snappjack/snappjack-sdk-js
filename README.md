@@ -43,7 +43,10 @@ npm install @snappjack/sdk-js
 ```
 
 ```typescript
-import { Snappjack, SnappjackServerHelper } from '@snappjack/sdk-js';
+// Client-side usage
+import { Snappjack } from '@snappjack/sdk-js';
+
+// Server-side usage
 import { SnappjackServerHelper } from '@snappjack/sdk-js/server';
 ```
 
@@ -59,9 +62,54 @@ For browser-only usage, you can serve the built browser version from your own se
 <script src="https://unpkg.com/@snappjack/sdk-js@latest/dist/snappjack-sdk.min.js"></script>
 ```
 
-## Getting Started: 5-Minute Example
+## Quick Start
 
-This minimal example demonstrates all four components of the Snappjack ecosystem working together. You'll build a simple web page that AI agents can control.
+Get started with Snappjack in just a few lines of code:
+
+```javascript
+// 1. Initialize the SDK
+const snappjack = new Snappjack({
+  snappId: 'your-app-id',
+  userId: 'user-123',
+  tokenProvider: () => fetch('/api/token').then(r => r.json()).then(d => d.token),
+
+  tools: [{
+    name: 'get_message',
+    description: 'Get the current message displayed to the user',
+    inputSchema: { type: 'object', properties: {} },
+    handler: async () => ({
+      content: [{ type: 'text', text: document.getElementById('message').textContent }]
+    })
+  }, {
+    name: 'set_message',
+    description: 'Update the message displayed to the user',
+    inputSchema: {
+      type: 'object',
+      properties: { text: { type: 'string' } },
+      required: ['text']
+    },
+    handler: async (args) => {
+      document.getElementById('message').textContent = args.text;
+      return { content: [{ type: 'text', text: 'Message updated successfully' }] };
+    }
+  }]
+});
+
+// 2. Connect and handle events
+snappjack.on('connection-info-updated', (data) => {
+  console.log('MCP Endpoint:', data.mcpEndpoint);
+  console.log('User API Key:', data.userApiKey);
+});
+
+await snappjack.connect();
+```
+
+**That's it!** Your app is now controllable by AI agents. See the [Complete Integration Example](#complete-integration-example) below for a full working application.
+
+## Complete Integration Example
+
+This comprehensive example demonstrates all four components of the Snappjack ecosystem working together. You'll build a complete web application that AI agents can control. Complete code is available at [https://github.com/snappjack/snappjack-demo-nodejs-hello-world](https://github.com/snappjack/snappjack-demo-nodejs-hello-world)
+
 
 ### Step 1: The Secure Backend
 
@@ -412,7 +460,9 @@ Tools define the interface between your application and AI agents:
 
 - **MCP Compliance**: Tools follow the Model Context Protocol specification, making them compatible with any MCP-enabled AI agent.
 
-## Client-Side SDK Usage
+## Client SDK Reference
+
+The client SDK runs in your web application and handles the real-time connection to AI agents.
 
 ### Initialization
 
@@ -427,10 +477,11 @@ const snappjack = new Snappjack({
 
   // Optional parameters
   tools: [/* tool definitions */],
-  autoReconnect: true,
-  reconnectInterval: 5000,
-  maxReconnectAttempts: 10,
-  logger: customLogger
+  requireAuthHeader: true,        // Default: true. Require Bearer token for agents
+  autoReconnect: true,           // Default: true. Auto-reconnect on disconnect
+  reconnectInterval: 5000,       // Default: 5000ms. Time between reconnect attempts
+  maxReconnectAttempts: 10,     // Default: 10. Max reconnection attempts before giving up
+  logger: customLogger          // Optional: Custom logger for debugging
 });
 ```
 
@@ -476,7 +527,22 @@ snappjack.registerTool(tool);
 
 ### Connection Management
 
-Connect and manage your Snapp's connection:
+#### Connection Lifecycle
+
+Your Snapp goes through three connection states:
+
+```text
+disconnected → connected → bridged
+     ↑             ↓           ↓
+     └─────────────┴───────────┘
+           (auto-reconnection)
+```
+
+- **`disconnected`**: Not connected to Snappjack Bridge
+- **`connected`**: Connected to Bridge, waiting for AI agent
+- **`bridged`**: AI agent connected and ready to interact
+
+#### Basic Connection Management
 
 ```typescript
 // Connect to Snappjack Bridge
@@ -488,6 +554,38 @@ await snappjack.disconnect();
 // Check current status
 console.log(snappjack.status); // 'disconnected' | 'connected' | 'bridged'
 ```
+
+#### Auto-Reconnection
+
+The SDK automatically handles connection failures:
+
+```typescript
+const snappjack = new Snappjack({
+  snappId: 'your-app-id',
+  userId: 'user-123',
+  tokenProvider: getToken,
+
+  // Auto-reconnection configuration
+  autoReconnect: true,           // Enable auto-reconnection (default: true)
+  reconnectInterval: 3000,       // Wait 3s between attempts (default: 5000ms)
+  maxReconnectAttempts: 5        // Try max 5 times (default: 10)
+});
+
+// Listen for reconnection events
+snappjack.on('status', (status) => {
+  if (status === 'disconnected') {
+    console.log('Connection lost, attempting to reconnect...');
+  } else if (status === 'connected') {
+    console.log('Reconnected successfully!');
+  }
+});
+```
+
+**Auto-reconnection triggers:**
+- Network connectivity issues
+- Server restarts or maintenance
+- WebSocket connection drops
+- Authentication token expiration
 
 ### Handling Events
 
@@ -520,21 +618,91 @@ snappjack.on('error', (error) => {
 });
 ```
 
-### Managing Tools
+### Tool Management
 
-Add, remove, and inspect tools dynamically:
+#### Tool Registration Lifecycle
+
+Tools can be registered before or after connecting:
 
 ```typescript
-// Register a new tool
-snappjack.registerTool(myTool);
+// Option 1: Register tools during initialization
+const snappjack = new Snappjack({
+  snappId: 'your-app-id',
+  userId: 'user-123',
+  tokenProvider: getToken,
+  tools: [tool1, tool2, tool3]  // Tools available immediately on connection
+});
 
-// Get all registered tools (without handlers)
-const tools = snappjack.getTools();
+// Option 2: Register tools dynamically
+snappjack.registerTool(newTool);  // Available to agents within seconds
 
-// Tools are automatically available to connected agents
+// Get all registered tools (without handlers for security)
+const toolDefinitions = snappjack.getTools();
+console.log(toolDefinitions); // [{ name: 'tool1', description: '...', inputSchema: {...} }]
 ```
 
-## Server-Side SDK Usage (SnappjackServerHelper)
+#### Tool Handler Best Practices
+
+```typescript
+const tool = {
+  name: 'update_user_profile',
+  description: 'Update user profile information like name, email, or preferences',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      field: { type: 'string', enum: ['name', 'email', 'theme'] },
+      value: { type: 'string' }
+    },
+    required: ['field', 'value']
+  },
+  handler: async (args) => {
+    try {
+      // 1. Validate permissions
+      if (!userCanEdit(getCurrentUserId(), args.field)) {
+        return {
+          content: [{ type: 'text', text: 'Permission denied: Cannot edit this field' }],
+          isError: true
+        };
+      }
+
+      // 2. Sanitize input (even with schema validation)
+      const sanitizedValue = sanitizeInput(args.value);
+
+      // 3. Perform business logic
+      await updateUserField(args.field, sanitizedValue);
+
+      // 4. Update UI immediately for real-time sync
+      refreshProfileUI();
+
+      // 5. Return structured success response
+      return {
+        content: [{
+          type: 'text',
+          text: `Successfully updated ${args.field} to "${sanitizedValue}"`
+        }],
+        isError: false
+      };
+
+    } catch (error) {
+      // Always handle errors gracefully
+      console.error('Tool execution failed:', error);
+      return {
+        content: [{ type: 'text', text: `Failed to update profile: ${error.message}` }],
+        isError: true
+      };
+    }
+  }
+};
+```
+
+#### Tool Availability
+
+- **Registration Timing**: Tools registered before `connect()` are immediately available
+- **Dynamic Updates**: Tools registered after connection become available within 2-3 seconds
+- **Agent Discovery**: Connected agents automatically discover new tools
+- **Error Handling**: Invalid tools are rejected with descriptive error messages
+
+## Server SDK Reference
 
 The server-side SDK handles user management and authentication.
 
@@ -544,8 +712,8 @@ The server-side SDK handles user management and authentication.
 import { SnappjackServerHelper } from '@snappjack/sdk-js/server';
 
 const serverHelper = new SnappjackServerHelper({
-  snappId: 'your-app-id',
-  snappApiKey: process.env.SNAPP_API_KEY // wak_your_secret_key
+  snappId: 'your-app-id',              // Your app identifier from dashboard
+  snappApiKey: process.env.SNAPP_API_KEY // Secret key starting with 'wak_'
 });
 ```
 
@@ -584,11 +752,19 @@ app.post('/api/token', async (req, res) => {
 Control whether agents need Bearer tokens to connect:
 
 ```typescript
-// Disable authentication requirement (e.g., for development)
-await serverHelper.updateAuthRequirement('user-123', false);
+// Set default auth requirement during initialization
+const snappjack = new Snappjack({
+  snappId: 'your-app-id',
+  userId: 'user-123',
+  tokenProvider: getToken,
+  requireAuthHeader: false // Default: true
+});
+
+// Change auth requirement at runtime
+await snappjack.updateAuthRequirement(false);
 
 // Re-enable authentication requirement
-await serverHelper.updateAuthRequirement('user-123', true);
+await snappjack.updateAuthRequirement(true);
 ```
 
 Use cases for disabling authentication:
@@ -815,67 +991,142 @@ Before deploying your Snapp, ensure you have:
 
 ## API Reference
 
-### Snappjack (Client)
+### Snappjack (Client SDK)
 
 #### Constructor
+
 ```typescript
 new Snappjack(config: {
-  snappId: string;
-  userId: string;
-  tokenProvider: () => Promise<string>;
-  tools?: Tool[];
-  autoReconnect?: boolean;
-  reconnectInterval?: number;
-  maxReconnectAttempts?: number;
-  logger?: Logger;
+  // Required parameters
+  snappId: string;                          // Your unique app identifier
+  userId: string;                           // Unique user identifier
+  tokenProvider: () => Promise<string>;     // Function that returns ephemeral token
+
+  // Optional parameters
+  tools?: Tool[];                           // Initial tools to register
+  requireAuthHeader?: boolean;              // Default: true. Require Bearer token for agents
+  autoReconnect?: boolean;                  // Default: true. Auto-reconnect on disconnect
+  reconnectInterval?: number;               // Default: 5000. Milliseconds between reconnect attempts
+  maxReconnectAttempts?: number;           // Default: 10. Max reconnection attempts
+  logger?: Logger;                         // Custom logger for debugging
 })
 ```
 
 #### Methods
+
+**Connection Management:**
 - `connect(): Promise<void>` - Establish connection to Snappjack Bridge
-- `disconnect(): Promise<void>` - Close connection to Snappjack Bridge
-- `registerTool(tool: Tool): void` - Register a new tool
-- `getTools(): ToolDefinition[]` - Get registered tool definitions
+- `disconnect(): Promise<void>` - Close connection and stop auto-reconnection
+- `status: string` - Current connection status (`disconnected` | `connected` | `bridged`)
+
+**Tool Management:**
+- `registerTool(tool: Tool): void` - Register a new tool (available to agents within seconds)
+- `getTools(): ToolDefinition[]` - Get all registered tool definitions (excludes handlers)
+
+**Authentication:**
+- `updateAuthRequirement(requireAuthHeader: boolean): Promise<void>` - Update auth requirement in real-time
+
+**Event Handling:**
 - `on(event: string, listener: Function): Snappjack` - Add event listener
+- `off(event: string, listener: Function): Snappjack` - Remove event listener
 
 #### Events
-- `status` - Connection status changed (`disconnected` | `connected` | `bridged`)
-- `connection-info-updated` - Connection information available
-- `agent-connected` - AI agent connected
-- `agent-disconnected` - AI agent disconnected
-- `error` - Error occurred
 
-### SnappjackServerHelper
+**Connection Events:**
+- `status` - Connection status changed
+  ```typescript
+  snappjack.on('status', (status: 'disconnected' | 'connected' | 'bridged') => {
+    console.log('Status:', status);
+  });
+  ```
+
+- `connection-info-updated` - Connection information available for agent setup
+  ```typescript
+  snappjack.on('connection-info-updated', (data: {
+    mcpEndpoint: string;      // MCP endpoint URL for agents
+    userApiKey: string;       // User API key for agents
+    requireAuthHeader: boolean; // Whether auth is currently required
+  }) => {
+    showAgentInstructions(data);
+  });
+  ```
+
+**Agent Events:**
+- `agent-connected` - AI agent connected
+  ```typescript
+  snappjack.on('agent-connected', (data: { agentSessionId: string }) => {
+    console.log('Agent connected:', data.agentSessionId);
+  });
+  ```
+
+- `agent-disconnected` - AI agent disconnected
+  ```typescript
+  snappjack.on('agent-disconnected', (data: { agentSessionId: string }) => {
+    console.log('Agent disconnected:', data.agentSessionId);
+  });
+  ```
+
+**Error Events:**
+- `error` - Error occurred
+  ```typescript
+  snappjack.on('error', (error: Error) => {
+    console.error('Snappjack error:', error);
+  });
+  ```
+
+### SnappjackServerHelper (Server SDK)
 
 #### Constructor
+
 ```typescript
 new SnappjackServerHelper(config: {
-  snappId: string;
-  snappApiKey: string;
+  snappId: string;      // Your app identifier from dashboard
+  snappApiKey: string;  // Secret key starting with 'wak_' (never expose client-side)
 })
 ```
 
 #### Methods
-- `createUser(): Promise<UserResult>` - Create user with auto-generated ID
+
+**User Management:**
+- `createUser(): Promise<UserResult>` - Create new user with auto-generated UUID
 - `registerUser(userId: string): Promise<UserResult>` - Register user with custom ID
-- `generateEphemeralToken(userId: string): Promise<TokenResult>` - Generate auth token
-- `updateAuthRequirement(userId: string, require: boolean): Promise<AuthUpdateResult>` - Update auth requirement
+- `generateEphemeralToken(userId: string): Promise<TokenResult>` - Generate short-lived token (expires in 10 seconds)
+
+**Connection Testing:**
+- `testConnection(): Promise<{ success: boolean; error?: string }>` - Test connection to Snappjack servers
 
 #### Response Types
+
 ```typescript
 interface UserResult {
-  userId: string;
-  userApiKey: string;
-  snappId: string;
-  mcpEndpoint: string;
-  createdAt: string;
+  userId: string;        // The user's unique identifier
+  userApiKey: string;    // User's API key (starts with 'uak_')
+  snappId: string;       // Your app identifier
+  mcpEndpoint: string;   // MCP endpoint URL for agents
+  createdAt: string;     // ISO timestamp of user creation
 }
 
 interface TokenResult {
-  token: string;
-  expiresAt: number;
-  snappId: string;
-  userId: string;
+  token: string;         // JWT token for WebSocket authentication
+  expiresAt: number;     // Unix timestamp when token expires
+  snappId: string;       // Your app identifier
+  userId: string;        // User identifier this token is for
+}
+```
+
+#### Error Handling
+
+```typescript
+import { SnappjackHttpError } from '@snappjack/sdk-js/server';
+
+try {
+  const user = await serverHelper.createUser();
+} catch (error) {
+  if (error instanceof SnappjackHttpError) {
+    console.error('HTTP Error:', error.status, error.body);
+  } else {
+    console.error('Other error:', error.message);
+  }
 }
 ```
 

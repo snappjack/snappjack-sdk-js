@@ -27,4 +27,8 @@ module.exports = {
   // Clear mocks between tests
   clearMocks: true,
   restoreMocks: true,
+  // Define globals for compile-time constants
+  globals: {
+    __SNAPPJACK_SERVER_URL__: 'http://localhost:3000', // Use localhost for tests
+  },
 };

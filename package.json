@@ -1,6 +1,6 @@
 {
   "name": "@snappjack/sdk-js",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "TypeScript SDK for Snappjack - Enable your app for AI agents with secure JWT authentication",
   "main": "dist/client.js",
   "module": "dist/client.mjs",
@@ -46,13 +46,16 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc && npm run build:browser",
-    "build:browser": "rollup -c rollup.config.mjs",
-    "dev": "concurrently \"tsc --watch\" \"rollup -c rollup.config.mjs --watch\"",
+    "build": "NODE_ENV=production tsc && npm run build:browser",
+    "build:browser": "NODE_ENV=production rollup -c rollup.config.mjs",
+    "build:dev": "NODE_ENV=development tsc && npm run build:browser:dev",
+    "build:browser:dev": "NODE_ENV=development rollup -c rollup.config.mjs",
+    "dev": "concurrently \"tsc --watch\" \"NODE_ENV=development rollup -c rollup.config.mjs --watch\"",
     "test": "jest --watch",
     "test:ci": "jest --ci",
     "test:coverage": "jest --ci --coverage",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build"
   },
   "keywords": [
     "snappjack",
@@ -69,6 +72,7 @@
     "@rollup/plugin-commonjs": "^28.0.6",
     "@rollup/plugin-json": "^6.1.0",
     "@rollup/plugin-node-resolve": "^16.0.0",
+    "@rollup/plugin-replace": "^6.0.2",
     "@rollup/plugin-terser": "^0.4.4",
     "@rollup/plugin-typescript": "^12.1.1",
     "@types/jest": "^30.0.0",
@@ -92,6 +96,7 @@
     "access": "public"
   },
   "dependencies": {
-    "ajv": "^8.17.1"
+    "ajv": "^8.17.1",
+    "dotenv": "^17.2.2"
   }
 }

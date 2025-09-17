@@ -59,6 +59,7 @@ export class Snappjack extends EventEmitter {
   // Agent session tracking
   private currentAgentSessionId: string | null = null;
   private lastToolCallAgentSessionId: string | undefined;
+  private currentRequireAuthHeader: boolean;
 
   /**
    * Static method to create a new user via the snapp's API endpoint
@@ -87,10 +88,8 @@ export class Snappjack extends EventEmitter {
   constructor(config: SnappjackConfig) {
     super();
 
-    // Get server URL from environment or use default
-    const serverUrl = (typeof process !== 'undefined' && process.env && process.env.NEXT_PUBLIC_SNAPPJACK_SERVER_URL) 
-      ? process.env.NEXT_PUBLIC_SNAPPJACK_SERVER_URL 
-      : DEFAULT_SNAPPJACK_SERVER_URL;
+    // Use compile-time configured server URL
+    const serverUrl = DEFAULT_SNAPPJACK_SERVER_URL;
 
     // Define all defaults in one place
     const defaultConfig = {
@@ -100,6 +99,7 @@ export class Snappjack extends EventEmitter {
       maxReconnectAttempts: 10,
       tools: [],
       logger: this.defaultLogger,
+      requireAuthHeader: true,  // Default to secure behavior
     };
 
     // Create a clean config object by removing any keys with an `undefined` value from the user's input
@@ -130,7 +130,8 @@ export class Snappjack extends EventEmitter {
     this.config.serverUrl = this.config.serverUrl.replace(/^http/, 'ws');
 
     this.logger = this.config.logger;
-    
+    this.currentRequireAuthHeader = this.config.requireAuthHeader;
+
     // Initialize components
     this.toolRegistry = new ToolRegistry(this.logger);
     this.connectionManager = new ConnectionManager(this.createConnectionConfig(), this.logger);
@@ -198,6 +199,7 @@ export class Snappjack extends EventEmitter {
 
     this.connectionManager.on('open', () => {
       this.sendToolsRegistration();
+      this.sendInitialAuthRequirement();
     });
   }
 
@@ -283,18 +285,37 @@ export class Snappjack extends EventEmitter {
     try {
       const tools = this.getTools();
       this.logger.log(`🛠️ Snappjack: Registering ${tools.length} tools: ${tools.map(t => t.name).join(', ')}`);
-      
+
       const message: ToolRegistrationMessage = {
         type: 'tools-registration',
         tools: tools
       };
-      
+
       this.logger.log(`🛠️ Snappjack: Tools registration message: ${JSON.stringify(message)}`);
       this.connectionManager.send(message);
       this.logger.log('✅ Snappjack: Tools registration sent successfully');
     } catch (error) {
       this.logger.error(`❌ Snappjack: Error sending tools registration: ${error instanceof Error ? error.message : String(error)}`);
       this.emit('error', error);
+    }
+  }
+
+  /**
+   * Send initial auth requirement on connection if different from server default
+   */
+  private sendInitialAuthRequirement(): void {
+    try {
+      // Only send if the user specified a non-default value (server defaults to true)
+      if (this.currentRequireAuthHeader !== true) {
+        this.logger.log(`🔒 Snappjack: Setting initial auth requirement to: ${this.currentRequireAuthHeader}`);
+        this.connectionManager.send({
+          type: 'update-auth-requirement',
+          requireAuthHeader: this.currentRequireAuthHeader
+        });
+      }
+    } catch (error) {
+      this.logger.error(`❌ Snappjack: Error sending initial auth requirement: ${error instanceof Error ? error.message : String(error)}`);
+      // Don't emit error event here as it's not critical - the user can still call updateAuthRequirement later
     }
   }
 
@@ -542,6 +563,55 @@ export class Snappjack extends EventEmitter {
       this.logger.error(`❌ Snappjack: Failed to force disconnect agent: ${errorMessage}`);
       throw new Error(`Failed to force disconnect agent: ${errorMessage}`);
     }
+  }
+
+  /**
+   * Update the authentication requirement for this user's MCP endpoint
+   * @param requireAuthHeader - Whether to require Bearer token authentication
+   * @returns Promise that resolves when the change is confirmed via connection-info-updated event
+   */
+  public async updateAuthRequirement(requireAuthHeader: boolean): Promise<void> {
+    return new Promise((resolve, reject) => {
+      try {
+        // Validate input
+        if (typeof requireAuthHeader !== 'boolean') {
+          reject(new Error('requireAuthHeader must be a boolean'));
+          return;
+        }
+
+        // Set up one-time listener for the connection-info-updated event
+        const timeout = setTimeout(() => {
+          reject(new Error('Timeout waiting for auth requirement update confirmation'));
+        }, 10000); // 10 second timeout
+
+        const onConnectionInfoUpdated = (data: ConnectionData) => {
+          // Check if this update is for our auth requirement change
+          if (data.requireAuthHeader === requireAuthHeader) {
+            clearTimeout(timeout);
+            this.currentRequireAuthHeader = requireAuthHeader;
+            this.off('connection-info-updated', onConnectionInfoUpdated);
+            this.logger.log(`🔒 Snappjack: Auth requirement updated to: ${requireAuthHeader}`);
+            resolve();
+          }
+        };
+
+        // Listen for the confirmation event
+        this.on('connection-info-updated', onConnectionInfoUpdated);
+
+        // Send the update message
+        this.connectionManager.send({
+          type: 'update-auth-requirement',
+          requireAuthHeader
+        });
+
+        this.logger.log(`🔄 Snappjack: Requesting auth requirement change to: ${requireAuthHeader}`);
+
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        this.logger.error(`❌ Snappjack: Failed to update auth requirement: ${errorMessage}`);
+        reject(new Error(`Failed to update auth requirement: ${errorMessage}`));
+      }
+    });
   }
 
   /**

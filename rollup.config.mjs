@@ -3,6 +3,26 @@ import { nodeResolve } from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
 import json from '@rollup/plugin-json';
 import terser from '@rollup/plugin-terser';
+import replace from '@rollup/plugin-replace';
+import dotenv from 'dotenv';
+dotenv.config();
+
+
+// Get server URL from environment or use defaults
+const getServerUrl = () => {
+  // For development builds, use .env file or localhost
+  if ((process.env.NODE_ENV !== 'production') && process.env.SNAPPJACK_SERVER_URL) {
+    return process.env.SNAPPJACK_SERVER_URL;
+  }
+  // For production builds, use the production server
+  return 'https://bridge.snappjack.com';
+};
+
+// Create replace plugin with server URL
+const createReplacePlugin = () => replace({
+  __SNAPPJACK_SERVER_URL__: JSON.stringify(getServerUrl()),
+  preventAssignment: true
+});
 
 export default [
   // UMD builds - use index-umd.ts which only exports default
@@ -26,6 +46,7 @@ export default [
       }
     ],
     plugins: [
+      createReplacePlugin(),
       nodeResolve({
         browser: true
       }),
@@ -48,6 +69,7 @@ export default [
       sourcemap: true
     },
     plugins: [
+      createReplacePlugin(),
       nodeResolve({
         browser: true
       }),
@@ -70,6 +92,7 @@ export default [
       sourcemap: true
     },
     plugins: [
+      createReplacePlugin(),
       nodeResolve({
         browser: false,
         preferBuiltins: true
@@ -101,6 +124,7 @@ export default [
     ],
     external: ['node:fetch', 'fetch'],
     plugins: [
+      createReplacePlugin(),
       nodeResolve({
         preferBuiltins: true
       }),

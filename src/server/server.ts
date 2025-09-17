@@ -62,10 +62,8 @@ export class SnappjackServerHelper {
       throw new Error('Invalid snappApiKey format. Expected: wak_[16 hex chars]');
     }
 
-    // Get server URL from environment or use default
-    const serverUrl = (typeof process !== 'undefined' && process.env && process.env.NEXT_PUBLIC_SNAPPJACK_SERVER_URL) 
-      ? process.env.NEXT_PUBLIC_SNAPPJACK_SERVER_URL 
-      : DEFAULT_SNAPPJACK_SERVER_URL;
+    // Use compile-time configured server URL
+    const serverUrl = DEFAULT_SNAPPJACK_SERVER_URL;
 
     this.config = {
       ...config,
@@ -153,31 +151,6 @@ export class SnappjackServerHelper {
     const path = `/api/snapp/${encodeURIComponent(this.config.snappId)}/ephemeral-token`;
     return this._makeRequest<EphemeralTokenResponse>('POST', path, { userId });
   }
-
-  /**
-   * Update authentication requirement for a specific user
-   * @param userId - The user ID to update
-   * @param requireAuthHeader - Whether to require Bearer token authentication
-   * @returns Promise with update result
-   */
-  async updateAuthRequirement(userId: string, requireAuthHeader: boolean): Promise<{
-    snappId: string;
-    userId: string;
-    requireAuthHeader: boolean;
-    updatedAt: string;
-  }> {
-    if (!userId || typeof userId !== 'string') {
-      throw new Error('userId must be a non-empty string');
-    }
-
-    if (typeof requireAuthHeader !== 'boolean') {
-      throw new Error('requireAuthHeader must be a boolean');
-    }
-
-    const path = `/api/snapp/${encodeURIComponent(this.config.snappId)}/users/${encodeURIComponent(userId)}/auth-requirement`;
-    return this._makeRequest('PATCH', path, { requireAuthHeader });
-  }
-
 
   /**
    * Test connection to Snappjack server with current configuration
