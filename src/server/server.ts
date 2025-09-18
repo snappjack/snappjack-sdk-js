@@ -21,6 +21,7 @@ export class SnappjackHttpError extends Error {
 export interface ServerConfig {
   snappApiKey: string;
   snappId: string;
+  serverUrl?: string; // Optional server URL for testing/custom environments
 }
 
 export interface CreateUserResponse {
@@ -47,7 +48,7 @@ export interface EphemeralTokenResponse {
 }
 
 export class SnappjackServerHelper {
-  private config: Required<ServerConfig> & { snappjackServerUrl: string };
+  private config: Required<Pick<ServerConfig, 'snappApiKey' | 'snappId'>> & { snappjackServerUrl: string; serverUrl?: string };
 
   constructor(config: ServerConfig) {
     if (!config.snappApiKey) {
@@ -62,8 +63,8 @@ export class SnappjackServerHelper {
       throw new Error('Invalid snappApiKey format. Expected: wak_[16 hex chars]');
     }
 
-    // Use compile-time configured server URL
-    const serverUrl = DEFAULT_SNAPPJACK_SERVER_URL;
+    // Use provided server URL or fall back to compile-time configured default
+    const serverUrl = config.serverUrl || DEFAULT_SNAPPJACK_SERVER_URL;
 
     this.config = {
       ...config,

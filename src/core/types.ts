@@ -14,6 +14,7 @@ export interface SnappjackConfig {
   userId: string;
   tokenProvider: () => Promise<string>;  // Function to get fresh JWT tokens
 
+  serverUrl?: string;  // Optional server URL for testing/custom environments
   tools?: Tool[];
   autoReconnect?: boolean;
   reconnectInterval?: number;
@@ -59,6 +60,7 @@ export type Tool = {
     type: "object";
   };
   title?: string;
+  timeoutMs?: number;
 } & {
   handler?: ToolHandler;
 };

@@ -88,8 +88,8 @@ export class Snappjack extends EventEmitter {
   constructor(config: SnappjackConfig) {
     super();
 
-    // Use compile-time configured server URL
-    const serverUrl = DEFAULT_SNAPPJACK_SERVER_URL;
+    // Use provided server URL or fall back to compile-time configured default
+    const serverUrl = config.serverUrl || DEFAULT_SNAPPJACK_SERVER_URL;
 
     // Define all defaults in one place
     const defaultConfig = {
