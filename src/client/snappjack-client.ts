@@ -60,6 +60,7 @@ export class Snappjack extends EventEmitter {
   private currentAgentSessionId: string | null = null;
   private lastToolCallAgentSessionId: string | undefined;
   private currentRequireAuthHeader: boolean;
+  private requireAuthHeaderExplicitlySet: boolean;
 
   /**
    * Static method to create a new user via the snapp's API endpoint
@@ -101,6 +102,9 @@ export class Snappjack extends EventEmitter {
       logger: this.defaultLogger,
       requireAuthHeader: true,  // Default to secure behavior
     };
+
+    // Track whether requireAuthHeader was explicitly provided by the user
+    this.requireAuthHeaderExplicitlySet = config.hasOwnProperty('requireAuthHeader') && config.requireAuthHeader !== undefined;
 
     // Create a clean config object by removing any keys with an `undefined` value from the user's input
     const definedUserConfig = Object.fromEntries(
@@ -199,7 +203,6 @@ export class Snappjack extends EventEmitter {
 
     this.connectionManager.on('open', () => {
       this.sendToolsRegistration();
-      this.sendInitialAuthRequirement();
     });
   }
 
@@ -301,17 +304,25 @@ export class Snappjack extends EventEmitter {
   }
 
   /**
-   * Send initial auth requirement on connection if different from server default
+   * Send initial auth requirement if explicitly specified by user and different from server value
    */
-  private sendInitialAuthRequirement(): void {
+  private sendInitialAuthRequirementIfNeeded(serverCurrentValue: boolean): void {
     try {
-      // Only send if the user specified a non-default value (server defaults to true)
-      if (this.currentRequireAuthHeader !== true) {
-        this.logger.log(`🔒 Snappjack: Setting initial auth requirement to: ${this.currentRequireAuthHeader}`);
-        this.connectionManager.send({
-          type: 'update-auth-requirement',
-          requireAuthHeader: this.currentRequireAuthHeader
-        });
+      // Only send the auth requirement if the user explicitly specified it in the constructor
+      // If not specified, let the server use its existing stored value or default
+      if (this.requireAuthHeaderExplicitlySet) {
+        // Check if our desired value is different from what the server currently has
+        if (this.currentRequireAuthHeader !== serverCurrentValue) {
+          this.logger.log(`🔒 Snappjack: Server has auth requirement: ${serverCurrentValue}, user wants: ${this.currentRequireAuthHeader}, sending update`);
+          this.connectionManager.send({
+            type: 'update-auth-requirement',
+            requireAuthHeader: this.currentRequireAuthHeader
+          });
+        } else {
+          this.logger.log(`🔒 Snappjack: Server auth requirement (${serverCurrentValue}) matches user preference (${this.currentRequireAuthHeader}), no update needed`);
+        }
+      } else {
+        this.logger.log(`🔒 Snappjack: Auth requirement not specified by user, using server value: ${serverCurrentValue}`);
       }
     } catch (error) {
       this.logger.error(`❌ Snappjack: Error sending initial auth requirement: ${error instanceof Error ? error.message : String(error)}`);
@@ -355,24 +366,30 @@ export class Snappjack extends EventEmitter {
    */
   private handleConnectionInfo(message: any): void {
     this.logger.log(`🔗 Snappjack: Received connection info with userApiKey: ${message.userApiKey ? 'present' : 'missing'}`);
-    
+
     if (message.userApiKey) {
+      // Get the server's current auth requirement value
+      const serverAuthRequirement = message.requireAuthHeader ?? true;
+
+      // Check if we need to update the auth requirement based on user preference vs server value
+      this.sendInitialAuthRequirementIfNeeded(serverAuthRequirement);
+
       this.logger.log('🔑 Snappjack: Emitting connection-info-updated event');
-      
+
       // Build MCP endpoint URL using the configured server URL
       const baseUrl = this.config.serverUrl
         .replace(/^ws:/, 'http:')
         .replace(/^wss:/, 'https:');
       const mcpEndpoint = `${baseUrl}/mcp/${this.config.snappId}/${this.config.userId}`;
-      
+
       const eventData: ConnectionData = {
         userApiKey: message.userApiKey,
         snappId: this.config.snappId,
         userId: this.config.userId,
         mcpEndpoint: mcpEndpoint,
-        requireAuthHeader: message.requireAuthHeader ?? true
+        requireAuthHeader: serverAuthRequirement
       };
-      
+
       this.logger.log(`🔑 Snappjack: Event data: ${JSON.stringify(eventData)}`);
       this.emit('connection-info-updated', eventData);
       // Keep backward compatibility
