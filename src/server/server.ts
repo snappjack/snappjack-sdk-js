@@ -81,7 +81,7 @@ export class SnappjackServerHelper {
     body?: any
   ): Promise<T> {
     const url = `${this.config.snappjackServerUrl}${path}`;
-    
+
     const response = await fetch(url, {
       method,
       headers: {
@@ -94,7 +94,7 @@ export class SnappjackServerHelper {
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'Unknown error');
-      
+
       // Try to parse JSON, but always include HTTP context
       let errorBody;
       try {
@@ -103,7 +103,7 @@ export class SnappjackServerHelper {
         // If JSON parsing fails, create simple error body
         errorBody = { error: `API request failed: ${response.status} ${response.statusText}` };
       }
-      
+
       throw new SnappjackHttpError(
         errorBody.error || `API request failed: ${response.status} ${response.statusText}`,
         response.status,
@@ -124,21 +124,21 @@ export class SnappjackServerHelper {
     return this._makeRequest<CreateUserResponse>('POST', path);
   }
 
-    /**
-   * Register a user with a client-provided userId
-   * This is the new primary method for user registration
-   * @param userId - The client-provided user ID to register
-   * @returns Promise with registration result or throws on conflict/error
-   */
-    async registerUser(userId: string): Promise<RegisterUserResponse> {
-      if (!userId || typeof userId !== 'string') {
-        throw new Error('userId must be a non-empty string');
-      }
-  
-      const path = `/api/snapp/${encodeURIComponent(this.config.snappId)}/users/${encodeURIComponent(userId)}/register`;
-      return this._makeRequest<RegisterUserResponse>('POST', path);
+  /**
+ * Register a user with a client-provided userId
+ * This is the new primary method for user registration
+ * @param userId - The client-provided user ID to register
+ * @returns Promise with registration result or throws on conflict/error
+ */
+  async registerUser(userId: string): Promise<RegisterUserResponse> {
+    if (!userId || typeof userId !== 'string') {
+      throw new Error('userId must be a non-empty string');
     }
-    
+
+    const path = `/api/snapp/${encodeURIComponent(this.config.snappId)}/users/${encodeURIComponent(userId)}/register`;
+    return this._makeRequest<RegisterUserResponse>('POST', path);
+  }
+
 
   /**
    * Generate an ephemeral JWT token for WebSocket authentication
@@ -166,17 +166,17 @@ export class SnappjackServerHelper {
       });
 
       if (!response.ok) {
-        return { 
-          success: false, 
-          error: `Server responded with ${response.status}: ${response.statusText}` 
+        return {
+          success: false,
+          error: `Server responded with ${response.status}: ${response.statusText}`
         };
       }
 
       return { success: true };
     } catch (error) {
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
       };
     }
   }
