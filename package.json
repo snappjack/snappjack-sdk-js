@@ -1,6 +1,6 @@
 {
   "name": "@snappjack/sdk-js",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "TypeScript SDK for Snappjack - Enable your app for AI agents with secure JWT authentication",
   "main": "dist/client.js",
   "module": "dist/client.mjs",
